@@ -550,10 +550,8 @@ class BilibiliCrawler(AbstractCrawler):
             return browser_context
 
         except Exception as e:
-            utils.logger.error(f"[BilibiliCrawler] CDP mode launch failed, fallback to standard mode: {e}")
-            # Fallback to standard mode
-            chromium = playwright.chromium
-            return await self.launch_browser(chromium, playwright_proxy, user_agent, headless)
+            utils.logger.error(f"[BilibiliCrawler] CDP mode launch failed: {e}")
+            raise
 
     async def close(self):
         """Close browser context"""

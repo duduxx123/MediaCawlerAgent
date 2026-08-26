@@ -26,11 +26,26 @@ from urllib.parse import parse_qs, urlparse
 import execjs
 from parsel import Selector
 
+import config
 from constant import zhihu as zhihu_constant
 from model.m_zhihu import ZhihuComment, ZhihuContent, ZhihuCreator
 from tools import utils
 from tools.crawler_util import extract_text_from_html
 from tools.user_hash import anonymize_user_id, mask_nickname
+
+
+def _user_key(raw_id) -> str:
+    """用户标识落库：config.ZHIHU_SAVE_ORIGINAL_USER_INFO=True 时存原文（获客定位真实用户），否则脱敏哈希。"""
+    if config.ZHIHU_SAVE_ORIGINAL_USER_INFO:
+        return str(raw_id or "").strip() or ""
+    return anonymize_user_id(raw_id)
+
+
+def _user_nickname(name) -> str:
+    """昵称落库：开关打开时存原文，否则中间打码。"""
+    if config.ZHIHU_SAVE_ORIGINAL_USER_INFO:
+        return str(name or "")
+    return mask_nickname(name)
 
 ZHIHU_SGIN_JS = None
 
@@ -199,8 +214,8 @@ class ZhihuExtractor:
                 return res
             if not author.get("id"):
                 author = author.get("member")
-            res.creator_hash = anonymize_user_id(author.get("id"))
-            res.user_nickname = mask_nickname(author.get("name"))
+            res.creator_hash = _user_key(author.get("id"))
+            res.user_nickname = _user_nickname(author.get("name"))
 
         except Exception as e :
             utils.logger.warning(
@@ -338,8 +353,8 @@ class ZhihuExtractor:
             return None
 
         res = ZhihuCreator()
-        res.creator_hash = anonymize_user_id(creator_info.get("id"))
-        res.user_nickname = mask_nickname(creator_info.get("name"))
+        res.creator_hash = _user_key(creator_info.get("id"))
+        res.user_nickname = _user_nickname(creator_info.get("name"))
         res.follows = creator_info.get("followingCount")
         res.fans = creator_info.get("followerCount")
         res.anwser_count = creator_info.get("answerCount")

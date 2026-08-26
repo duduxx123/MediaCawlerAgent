@@ -1,7 +1,8 @@
 import type { ComponentType, ReactNode, KeyboardEvent } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Database, Globe, KeyRound, MessageSquare, Play, Square, X } from 'lucide-react'
+import { toast } from 'sonner'
+import { Database, Globe, KeyRound, MessageSquare, Play, Plus, Square, X } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
@@ -79,33 +80,50 @@ function KeywordInput({ value, onChange, placeholder, disabled }: KeywordInputPr
   // 将逗号分隔的字符串转换为数组
   const keywords = value ? value.split(',').map((k) => k.trim()).filter(Boolean) : []
 
+  // 提交当前输入框内容：回车、失焦、点“添加”按钮均可触发，避免用户误以为输入即生效
+  const commit = () => {
+    const trimmed = inputValue.trim()
+    if (trimmed && !keywords.includes(trimmed)) {
+      onChange([...keywords, trimmed].join(','))
+    }
+    setInputValue('')
+  }
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      const trimmed = inputValue.trim()
-      if (trimmed && !keywords.includes(trimmed)) {
-        const newKeywords = [...keywords, trimmed]
-        onChange(newKeywords.join(','))
-        setInputValue('')
-      }
+      commit()
     }
   }
 
   const removeKeyword = (keywordToRemove: string) => {
-    const newKeywords = keywords.filter((k) => k !== keywordToRemove)
-    onChange(newKeywords.join(','))
+    onChange(keywords.filter((k) => k !== keywordToRemove).join(','))
   }
 
   return (
     <div className="space-y-2">
-      <Input
-        value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        disabled={disabled}
-        className="h-9 text-xs"
-      />
+      <div className="flex gap-1.5">
+        <Input
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={commit}
+          placeholder={placeholder}
+          disabled={disabled}
+          className="h-9 text-xs"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={commit}
+          onMouseDown={(e) => e.preventDefault()}
+          disabled={disabled || !inputValue.trim()}
+          className="h-9 shrink-0 px-3"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
       {keywords.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {keywords.map((keyword) => (
@@ -147,7 +165,13 @@ export function CrawlerConfigPanel() {
   const isBusy = isStarting || isStopping || status === 'stopping'
 
   const handleStart = () => {
-    startCrawler(config)
+    // 从 store 读取最新配置（关键词失焦提交发生在点击“启动”之前，需绕过闭包里的旧快照）
+    const latest = useCrawlerStore.getState().config
+    if (latest.crawler_type === 'search' && !(latest.keywords || '').trim()) {
+      toast.error(t('error.emptyKeywords'))
+      return
+    }
+    startCrawler(latest)
   }
 
   const handleStop = () => {

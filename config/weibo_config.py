@@ -38,3 +38,8 @@ WEIBO_CREATOR_ID_LIST = [
 # Whether to enable the function of crawling the full text of Weibo. It is enabled by default.
 # If turned on, it will increase the probability of being risk controlled, which is equivalent to a keyword search request that will traverse all posts and request the post details again.
 ENABLE_WEIBO_FULL_TEXT = True
+
+# 是否保存原始用户信息（微博）。True（当前）：落库的用户标识（creator_hash 字段）
+# 与昵称保存原文，用于 AI 获客等需要定位真实用户的场景。False：教学版脱敏（sha256 哈希 + 昵称打码）。
+# 注意：原始用户信息属于个人信息，请仅用于本人授权范围内的合法用途。
+WEIBO_SAVE_ORIGINAL_USER_INFO = True

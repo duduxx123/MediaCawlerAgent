@@ -41,6 +41,12 @@ from database.models import Base, DouyinAweme, DouyinAwemeComment
 from tools.user_hash import anonymize_user_id, mask_nickname
 
 
+@pytest.fixture(autouse=True)
+def _pin_anonymized_mode(monkeypatch):
+    """本文件验证教学版脱敏路径：固定关闭抖音原文落库开关（默认已开启获客模式）。"""
+    monkeypatch.setattr(config, "DY_SAVE_ORIGINAL_USER_INFO", False)
+
+
 # 抖音教学版禁用字段(键):不得作为存储 dict 的 key 出现。
 FORBIDDEN_KEYS = {
     "user_id", "sec_uid", "short_user_id", "user_unique_id",

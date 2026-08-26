@@ -24,8 +24,8 @@
     "crawlTypePlaceholder": "选择类型",
     "startPage": "起始页",
     "keywords": "关键词",
-    "keywordsHint": "输入关键词后按回车添加",
-    "keywordsPlaceholder": "输入关键词，按回车添加...",
+    "keywordsHint": "输入后按回车或点 + 添加",
+    "keywordsPlaceholder": "输入关键词，回车或点 + 添加...",
     "specifiedIds": "帖子/视频 ID",
     "specifiedIdsHint": "输入帖子或视频的ID/URL，每行一个或用逗号分隔",
     "specifiedIdsPlaceholder": {
@@ -67,5 +67,8 @@
   "warning": {
     "cookieSlider": "[提示] 小红书和抖音平台不建议使用 Cookie 登录，因为可能会触发滑块验证",
     "xhsToken": "[重要] 小红书 URL 必须包含 xsec_token 参数，请从浏览器复制完整 URL"
+  },
+  "error": {
+    "emptyKeywords": "请先填写搜索关键词"
   }
 }

@@ -25,7 +25,22 @@
 import re
 from typing import List
 
+import config
 from tools.user_hash import anonymize_user_id, mask_nickname
+
+
+def _user_key(raw_id) -> str:
+    """用户标识落库：config.WEIBO_SAVE_ORIGINAL_USER_INFO=True 时存原文（获客定位真实用户），否则脱敏哈希。"""
+    if config.WEIBO_SAVE_ORIGINAL_USER_INFO:
+        return str(raw_id or "").strip() or ""
+    return anonymize_user_id(raw_id)
+
+
+def _user_nickname(name) -> str:
+    """昵称落库：开关打开时存原文，否则中间打码。"""
+    if config.WEIBO_SAVE_ORIGINAL_USER_INFO:
+        return str(name or "")
+    return mask_nickname(name)
 from var import source_keyword_var
 
 from .weibo_store_media import *
@@ -99,8 +114,8 @@ async def update_weibo_note(note_item: Dict):
         "note_url": f"https://m.weibo.cn/detail/{note_id}",
 
         # 创作者信息（匿名化/脱敏，不含原始 user_id/avatar/gender/profile_url/ip_location）
-        "creator_hash": anonymize_user_id(user_info.get("id")),
-        "nickname": mask_nickname(user_info.get("screen_name", "")),
+        "creator_hash": _user_key(user_info.get("id")),
+        "nickname": _user_nickname(user_info.get("screen_name", "")),
         "source_keyword": source_keyword_var.get(),
     }
     utils.logger.info(f"[store.weibo.update_weibo_note] weibo note id:{note_id}, title:{save_content_item.get('content')[:24]} ...")
@@ -153,8 +168,8 @@ async def update_weibo_note_comment(note_id: str, comment_item: Dict):
         "parent_comment_id": comment_item.get("rootid", ""),
 
         # 创作者信息（匿名化/脱敏，不含原始 user_id/avatar/gender/profile_url/ip_location）
-        "creator_hash": anonymize_user_id(user_info.get("id")),
-        "nickname": mask_nickname(user_info.get("screen_name", "")),
+        "creator_hash": _user_key(user_info.get("id")),
+        "nickname": _user_nickname(user_info.get("screen_name", "")),
     }
     utils.logger.info(f"[store.weibo.update_weibo_note_comment] Weibo note comment: {comment_id}, content: {save_comment_item.get('content', '')[:24]} ...")
     await WeibostoreFactory.create_store().store_comment(comment_item=save_comment_item)

@@ -32,6 +32,20 @@ from ._store_impl import *
 from .bilibilli_store_media import *
 
 
+def _user_key(raw_id) -> str:
+    """用户标识落库：config.BILI_SAVE_ORIGINAL_USER_INFO=True 时存原文（获客定位真实用户），否则脱敏哈希。"""
+    if config.BILI_SAVE_ORIGINAL_USER_INFO:
+        return str(raw_id or "").strip() or ""
+    return anonymize_user_id(raw_id)
+
+
+def _user_nickname(name) -> str:
+    """昵称落库：开关打开时存原文，否则中间打码。"""
+    if config.BILI_SAVE_ORIGINAL_USER_INFO:
+        return str(name or "")
+    return mask_nickname(name)
+
+
 class BiliStoreFactory:
     STORES = {
         "csv": BiliCsvStoreImplement,
@@ -63,8 +77,8 @@ async def update_bilibili_video(video_item: Dict):
         "title": video_item_view.get("title", "")[:500],
         "desc": video_item_view.get("desc", "")[:500],
         "create_time": video_item_view.get("pubdate"),
-        "creator_hash": anonymize_user_id(video_user_info.get("mid")),  # 创作者匿名哈希(不存原始 mid)
-        "nickname": mask_nickname(video_user_info.get("name")),  # 用户昵称(已脱敏)
+        "creator_hash": _user_key(video_user_info.get("mid")),  # 开关打开时存原文 mid
+        "nickname": _user_nickname(video_user_info.get("name")),  # 开关打开时存原文昵称
         "liked_count": str(video_item_stat.get("like", "")),
         "disliked_count": str(video_item_stat.get("dislike", "")),
         "video_play_count": str(video_item_stat.get("view", "")),
@@ -106,8 +120,8 @@ async def update_bilibili_video_comment(video_id: str, comment_item: Dict):
         "create_time": comment_item.get("ctime"),
         "video_id": str(video_id),
         "content": content.get("message"),
-        "creator_hash": anonymize_user_id(user_info.get("mid")),  # 创作者匿名哈希(不存原始 mid)
-        "nickname": mask_nickname(user_info.get("uname")),  # 用户昵称(已脱敏)
+        "creator_hash": _user_key(user_info.get("mid")),  # 开关打开时存原文 mid
+        "nickname": _user_nickname(user_info.get("uname")),  # 开关打开时存原文昵称
         "sub_comment_count": str(comment_item.get("rcount", 0)),
         "like_count": like_count,
         "last_modify_ts": utils.get_current_timestamp(),
@@ -175,8 +189,8 @@ async def update_bilibili_creator_contact(creator_info: Dict, fan_info: Dict):
 async def update_bilibili_creator_dynamic(creator_info: Dict, dynamic_info: Dict):
     save_dynamic_item = {
         "dynamic_id": dynamic_info["dynamic_id"],
-        "creator_hash": anonymize_user_id(creator_info.get("id")),  # 创作者匿名哈希(不存原始 ID)
-        "user_name": mask_nickname(creator_info.get("name")),  # 用户名称(已脱敏)
+        "creator_hash": _user_key(creator_info.get("id")),  # 开关打开时存原文 ID
+        "user_name": _user_nickname(creator_info.get("name")),  # 开关打开时存原文昵称
         "text": dynamic_info["text"],
         "type": dynamic_info["type"],
         "pub_ts": dynamic_info["pub_ts"],

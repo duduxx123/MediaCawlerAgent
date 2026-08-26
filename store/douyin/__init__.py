@@ -31,6 +31,52 @@ from ._store_impl import *
 from .douyin_store_media import *
 
 
+def _comment_user_key(user_info: Dict) -> str:
+    """评论/内容作者标识落库。
+    config.DY_SAVE_ORIGINAL_USER_INFO=True（获客模式）时保存原始 sec_uid
+    （用它定位用户回复/私信）；False（教学版）时脱敏哈希（不可反查）。
+    """
+    if config.DY_SAVE_ORIGINAL_USER_INFO:
+        return user_info.get("sec_uid", "")
+    return anonymize_user_id(user_info.get("uid"))
+
+
+def _comment_nickname(user_info: Dict) -> str:
+    """昵称落库：开关打开时保存原文，否则中间打码。"""
+    if config.DY_SAVE_ORIGINAL_USER_INFO:
+        return user_info.get("nickname", "")
+    return mask_nickname(user_info.get("nickname"))
+
+
+def _comment_douyin_id(user_info: Dict) -> str:
+    """Return the public Douyin ID shown on a user's profile, when available."""
+    if not config.DY_SAVE_ORIGINAL_USER_INFO:
+        return ""
+    return str(user_info.get("unique_id") or user_info.get("short_id") or "")
+
+
+def _comment_sec_uid(user_info: Dict) -> str:
+    """Return the stable sec_uid used for profile and action routing."""
+    if not config.DY_SAVE_ORIGINAL_USER_INFO:
+        return ""
+    return str(user_info.get("sec_uid") or "")
+
+
+def _comment_identity_fields(user_info: Dict) -> Dict[str, str]:
+    """Extra identity fields for file-based stores used by the leads UI.
+
+    Database schemas are intentionally left unchanged; adding these fields to a
+    database deployment requires a corresponding migration.
+    """
+    if (not config.DY_SAVE_ORIGINAL_USER_INFO or
+            config.SAVE_DATA_OPTION not in {"json", "jsonl", "csv", "excel"}):
+        return {}
+    return {
+        "douyin_id": _comment_douyin_id(user_info),
+        "sec_uid": _comment_sec_uid(user_info),
+    }
+
+
 class DouyinStoreFactory:
     STORES = {
         "csv": DouyinCsvStoreImplement,
@@ -165,8 +211,9 @@ async def update_douyin_aweme(aweme_item: Dict):
         "title": aweme_item.get("desc", ""),
         "desc": aweme_item.get("desc", ""),
         "create_time": aweme_item.get("create_time"),
-        "creator_hash": anonymize_user_id(user_info.get("uid")),  # 创作者匿名哈希(不存原始 uid)
-        "nickname": mask_nickname(user_info.get("nickname")),  # 用户昵称(已脱敏)
+        "creator_hash": _comment_user_key(user_info),  # 默认脱敏哈希；开关打开时保存原始 sec_uid
+        "nickname": _comment_nickname(user_info),  # 默认打码；开关打开时保存原始昵称
+        **_comment_identity_fields(user_info),
         "liked_count": str(interact_info.get("digg_count")),
         "collected_count": str(interact_info.get("collect_count")),
         "comment_count": str(interact_info.get("comment_count")),
@@ -203,8 +250,9 @@ async def update_dy_aweme_comment(aweme_id: str, comment_item: Dict):
         "create_time": comment_item.get("create_time"),
         "aweme_id": aweme_id,
         "content": comment_item.get("text"),
-        "creator_hash": anonymize_user_id(user_info.get("uid")),  # 创作者匿名哈希(不存原始 uid)
-        "nickname": mask_nickname(user_info.get("nickname")),  # 用户昵称(已脱敏)
+        "creator_hash": _comment_user_key(user_info),  # 默认脱敏哈希；开关打开时保存原始 sec_uid
+        "nickname": _comment_nickname(user_info),  # 默认打码；开关打开时保存原始昵称
+        **_comment_identity_fields(user_info),
         "sub_comment_count": str(comment_item.get("reply_comment_total", 0)),
         "like_count": (comment_item.get("digg_count") if comment_item.get("digg_count") else 0),
         "last_modify_ts": utils.get_current_timestamp(),

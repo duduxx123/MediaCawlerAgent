@@ -30,9 +30,9 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
-from .routers import crawler_router, data_router, websocket_router
+from .routers import crawler_router, data_router, leads_router, websocket_router, agent_router
 
 # Project root directory (used for running subprocesses like uv run main.py)
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -63,7 +63,9 @@ app.add_middleware(
 # Register routers
 app.include_router(crawler_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
+app.include_router(leads_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
+app.include_router(agent_router, prefix="/api")
 
 
 @app.get("/")
@@ -72,12 +74,8 @@ async def serve_frontend():
     index_path = os.path.join(WEBUI_DIR, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
-    return {
-        "message": "MediaCrawler WebUI API",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "note": "WebUI not found, please build it first: cd webui && npm run build"
-    }
+    # React WebUI 未构建时，直接跳转到数据展示页
+    return RedirectResponse(url="/leads/")
 
 
 @app.get("/api/health")
@@ -199,6 +197,12 @@ if os.path.exists(WEBUI_DIR):
         app.mount("/logos", StaticFiles(directory=logos_dir), name="logos")
     # Mount other static files (e.g., vite.svg)
     app.mount("/static", StaticFiles(directory=WEBUI_DIR), name="webui-static")
+
+
+# Mount 线索展示页面（独立 HTML，项目根目录 html/ 目录）
+HTML_DIR = PROJECT_ROOT / "html"
+if HTML_DIR.exists():
+    app.mount("/leads", StaticFiles(directory=str(HTML_DIR), html=True), name="leads")
 
 
 if __name__ == "__main__":

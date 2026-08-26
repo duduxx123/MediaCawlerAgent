@@ -67,6 +67,17 @@ class CrawlerFactory:
         return crawler_class()
 
 
+# CLI 平台 key -> data/ 目录名（与 store/*/_store_impl.py 中 AsyncFileWriter(platform=...) 保持一致）
+PLATFORM_DATA_DIR = {
+    "xhs": "xhs",
+    "dy": "douyin",
+    "ks": "kuaishou",
+    "bili": "bili",
+    "wb": "weibo",
+    "tieba": "tieba",
+    "zhihu": "zhihu",
+}
+
 crawler: Optional[AbstractCrawler] = None
 
 
@@ -89,7 +100,7 @@ async def _generate_wordcloud_if_needed() -> None:
 
     try:
         file_writer = AsyncFileWriter(
-            platform=config.PLATFORM,
+            platform=PLATFORM_DATA_DIR.get(config.PLATFORM, config.PLATFORM),
             crawler_type=crawler_type_var.get(),
         )
         await file_writer.generate_wordcloud_from_comments()

@@ -44,3 +44,10 @@ DY_CREATOR_ID_LIST = [
     "MS4wLjABAAAATJPY7LAlaa5X-c8uNdWkvz0jUGgpw4eeXIwu_8BhvqE"
     # ........................
 ]
+
+# 是否保存原始用户信息（抖音）。True（当前）：保存原始昵称、sec_uid，
+# 并在 JSON/JSONL/CSV/Excel 文件中额外保存用户资料里的 unique_id/short_id（抖音号）。
+# creator_hash 仍兼容保存 sec_uid（MS4wLjAB 开头，可用于回复/私信定位）。
+# False：教学版脱敏（sha256 哈希 + 昵称打码）。
+# 注意：原始用户信息属于个人信息，请仅用于本人授权范围内的合法用途。
+DY_SAVE_ORIGINAL_USER_INFO = True

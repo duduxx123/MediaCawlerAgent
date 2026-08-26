@@ -9,12 +9,21 @@
 3. 仓库 grep 断言 —— store/ 与 media_platform/ 不再把禁用字段作为存储 dict 的 key。
 """
 import re
-import subprocess
 import pathlib
 
 import pytest
 
+import config
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _pin_anonymized_mode(monkeypatch):
+    """本文件验证教学版脱敏路径：固定关闭各平台原文落库开关（默认已开启获客模式）。"""
+    for flag in ("XHS_SAVE_ORIGINAL_USER_INFO", "BILI_SAVE_ORIGINAL_USER_INFO",
+                 "TIEBA_SAVE_ORIGINAL_USER_INFO", "ZHIHU_SAVE_ORIGINAL_USER_INFO"):
+        monkeypatch.setattr(config, flag, False)
 
 # 统一的禁用字段名(键)。昵称字段(nickname/user_nickname/screen_name/name/user_name)允许保留(值需脱敏)。
 FORBIDDEN_KEYS = {
@@ -213,26 +222,37 @@ def test_bilibili_video_dict_masks_user_info():
 
 # ----------------------------- 仓库 grep 断言 -----------------------------
 
+def _scan_store_py_files(pattern: re.Pattern) -> list:
+    """用 Python 正则扫描 store/ 下所有 .py 源文件（跨平台，不依赖 grep；
+    Windows 上 shell grep 会因 GBK 编码解码失败导致误报）。"""
+    hits = []
+    for py_file in (ROOT / "store").rglob("*.py"):
+        try:
+            text = py_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                hits.append(f"{py_file.relative_to(ROOT)}:{i}: {line.strip()}")
+    return hits
+
+
 def test_store_no_forbidden_dict_keys():
     # store/ 下不得把禁用字段作为存储 dict 的 key("field": value 形式)
-    out = subprocess.run(
-        ["grep", "-rnE", '"(' + "|".join(FORBIDDEN_KEYS) + r')"\s*:', str(ROOT / "store")],
-        capture_output=True, text=True,
-    )
     # 允许的例外：Mongo store_creator 里的 query={"user_id": ...} 已全部改为 pass，应为空
-    assert out.stdout.strip() == "", f"store/ 仍写入禁用字段键:\n{out.stdout}"
+    pattern = re.compile(r'"(' + "|".join(sorted(FORBIDDEN_KEYS)) + r')"\s*:')
+    hits = _scan_store_py_files(pattern)
+    assert not hits, "store/ 仍写入禁用字段键:\n" + "\n".join(hits)
 
 
 def test_store_no_creator_orm_imports():
     # 已删除的 creator ORM 表(XhsCreator/DyCreator/...)不得再从 database.models 导入。
     # 注意:model/m_*.py 里的同名 pydantic 类是内存类型，允许保留。
-    out = subprocess.run(
-        ["grep", "-rnE",
-         r"from database\.models import.*(XhsCreator|DyCreator|WeiboCreator|TiebaCreator|ZhihuCreator|BilibiliUpInfo|BilibiliContactInfo)",
-         str(ROOT / "store")],
-        capture_output=True, text=True,
+    pattern = re.compile(
+        r"from database\.models import.*(XhsCreator|DyCreator|WeiboCreator|TiebaCreator|ZhihuCreator|BilibiliUpInfo|BilibiliContactInfo)"
     )
-    assert out.stdout.strip() == "", f"store/ 仍 import 已删除的 creator ORM 表:\n{out.stdout}"
+    hits = _scan_store_py_files(pattern)
+    assert not hits, "store/ 仍 import 已删除的 creator ORM 表:\n" + "\n".join(hits)
 
 
 if __name__ == "__main__":

@@ -119,7 +119,7 @@ ENABLE_GET_SUB_COMMENTS = False
 
 # word cloud related
 # Whether to enable generating comment word clouds
-ENABLE_GET_WORDCLOUD = False
+ENABLE_GET_WORDCLOUD = True
 # Custom words and their groups
 # Add rule: xx:yy where xx is a custom-added phrase, and yy is the group name to which the phrase xx is assigned.
 CUSTOM_WORDS = {

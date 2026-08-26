@@ -31,6 +31,20 @@ from tools.user_hash import anonymize_user_id, mask_nickname
 from ._store_impl import *
 
 
+def _user_key(raw_id) -> str:
+    """用户标识落库：config.KS_SAVE_ORIGINAL_USER_INFO=True 时存原文（获客定位真实用户），否则脱敏哈希。"""
+    if config.KS_SAVE_ORIGINAL_USER_INFO:
+        return str(raw_id or "").strip() or ""
+    return anonymize_user_id(raw_id)
+
+
+def _user_nickname(name) -> str:
+    """昵称落库：开关打开时存原文，否则中间打码。"""
+    if config.KS_SAVE_ORIGINAL_USER_INFO:
+        return str(name or "")
+    return mask_nickname(name)
+
+
 class KuaishouStoreFactory:
     STORES = {
         "csv": KuaishouCsvStoreImplement,
@@ -64,8 +78,8 @@ async def update_kuaishou_video(video_item: Dict):
         "title": photo_info.get("caption", "")[:500],
         "desc": photo_info.get("caption", "")[:500],
         "create_time": photo_info.get("timestamp"),
-        "creator_hash": anonymize_user_id(user_info.get("id")),  # 创作者匿名哈希(不存原始 user_id)
-        "nickname": mask_nickname(user_info.get("name")),  # 用户昵称(已脱敏)
+        "creator_hash": _user_key(user_info.get("id")),  # 开关打开时存原文 user_id
+        "nickname": _user_nickname(user_info.get("name")),  # 开关打开时存原文昵称
         "liked_count": str(photo_info.get("realLikeCount")),
         "viewd_count": str(photo_info.get("viewCount")),
         "last_modify_ts": utils.get_current_timestamp(),
@@ -97,10 +111,10 @@ async def update_ks_video_comment(video_id: str, comment_item: Dict):
         "create_time": comment_item.get("timestamp"),
         "video_id": video_id,
         "content": comment_item.get("content"),
-        # 创作者匿名哈希(不存原始 user_id)：V2: author_id, Old: authorId
-        "creator_hash": anonymize_user_id(comment_item.get("author_id") or comment_item.get("authorId")),
-        # 用户昵称(已脱敏)：V2: author_name, Old: authorName
-        "nickname": mask_nickname(comment_item.get("author_name") or comment_item.get("authorName")),
+        # 开关打开时存原文 user_id：V2: author_id, Old: authorId
+        "creator_hash": _user_key(comment_item.get("author_id") or comment_item.get("authorId")),
+        # 开关打开时存原文昵称：V2: author_name, Old: authorName
+        "nickname": _user_nickname(comment_item.get("author_name") or comment_item.get("authorName")),
         # V2: commentCount, Old: subCommentCount
         "sub_comment_count": str(comment_item.get("commentCount") or comment_item.get("subCommentCount", 0)),
         "last_modify_ts": utils.get_current_timestamp(),

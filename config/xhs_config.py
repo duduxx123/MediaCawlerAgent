@@ -35,3 +35,8 @@ XHS_CREATOR_ID_LIST = [
     "https://www.xiaohongshu.com/user/profile/5f58bd990000000001003753?xsec_token=ABYVg1evluJZZzpMX-VWzchxQ1qSNVW3r-jOEnKqMcgZw=&xsec_source=pc_search"
     # ........................
 ]
+
+# 是否保存原始用户信息（小红书）。True（当前）：落库的用户标识（creator_hash 字段）
+# 与昵称保存原文，用于 AI 获客等需要定位真实用户的场景。False：教学版脱敏（sha256 哈希 + 昵称打码）。
+# 注意：原始用户信息属于个人信息，请仅用于本人授权范围内的合法用途。
+XHS_SAVE_ORIGINAL_USER_INFO = True

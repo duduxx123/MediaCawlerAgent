@@ -184,3 +184,9 @@ debug_tools
 
 database/*.db
 .omx/
+
+# ===== 本地开发（个人工作区） =====
+# 一次性调试探针脚本/日志/截图/爬取断点文件
+/tmp_*
+# 本地 Claude Code 配置
+/.claude/

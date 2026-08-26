@@ -24,8 +24,8 @@
     "crawlTypePlaceholder": "Select type",
     "startPage": "START_PAGE",
     "keywords": "KEYWORDS",
-    "keywordsHint": "Press Enter to add keyword",
-    "keywordsPlaceholder": "Type keyword, press Enter to add...",
+    "keywordsHint": "Press Enter or click + to add keyword",
+    "keywordsPlaceholder": "Type keyword, press Enter or + to add...",
     "specifiedIds": "POST/VIDEO_ID",
     "specifiedIdsHint": "Enter post or video ID/URL, one per line or comma-separated",
     "specifiedIdsPlaceholder": {
@@ -67,5 +67,8 @@
   "warning": {
     "cookieSlider": "[Note] Cookie login is not recommended for Xiaohongshu and Douyin due to slider captcha",
     "xhsToken": "[Important] Xiaohongshu URLs must contain xsec_token parameter, please copy the full URL from browser"
+  },
+  "error": {
+    "emptyKeywords": "Please enter at least one keyword for search mode"
   }
 }

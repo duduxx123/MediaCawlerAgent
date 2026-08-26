@@ -2,8 +2,17 @@
 
 from pathlib import Path
 
+import pytest
+
+import config
 from media_platform.tieba.help import TieBaExtractor
 from model.m_baidu_tieba import TiebaComment
+
+
+@pytest.fixture(autouse=True)
+def _pin_anonymized_mode(monkeypatch):
+    """本文件断言教学版脱敏输出（昵称打码）：固定关闭贴吧原文落库开关（默认已开启获客模式）。"""
+    monkeypatch.setattr(config, "TIEBA_SAVE_ORIGINAL_USER_INFO", False)
 
 
 FIXTURE_DIR = Path(__file__).parent.parent / "media_platform" / "tieba" / "test_data"

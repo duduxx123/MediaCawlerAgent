@@ -25,6 +25,12 @@ from .crawler import (
     CrawlerStatusResponse,
     LogEntry,
 )
+from .agent import (
+    AgentChatMessage,
+    AgentChatRequest,
+    AgentChatResponse,
+    AgentStatusResponse,
+)
 
 __all__ = [
     "PlatformEnum",
@@ -34,4 +40,8 @@ __all__ = [
     "CrawlerStartRequest",
     "CrawlerStatusResponse",
     "LogEntry",
+    "AgentChatMessage",
+    "AgentChatRequest",
+    "AgentChatResponse",
+    "AgentStatusResponse",
 ]

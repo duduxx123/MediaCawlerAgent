@@ -413,10 +413,8 @@ class WeiboCrawler(AbstractCrawler):
             return browser_context
 
         except Exception as e:
-            utils.logger.error(f"[WeiboCrawler] CDP mode startup failed, falling back to standard mode: {e}")
-            # Fallback to standard mode
-            chromium = playwright.chromium
-            return await self.launch_browser(chromium, playwright_proxy, user_agent, headless)
+            utils.logger.error(f"[WeiboCrawler] CDP mode startup failed: {e}")
+            raise
 
     async def get_note_full_text(self, note_item: Dict) -> Dict:
         """

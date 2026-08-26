@@ -22,6 +22,15 @@ import asyncio
 
 import pytest
 
+import config
+
+
+@pytest.fixture(autouse=True)
+def _pin_anonymized_mode(monkeypatch):
+    """本文件验证教学版脱敏路径：固定关闭微博原文落库开关（默认已开启获客模式）。"""
+    monkeypatch.setattr(config, "WEIBO_SAVE_ORIGINAL_USER_INFO", False)
+
+
 # 原始(明文)测试数据
 RAW_USER_ID = 7654321
 RAW_NICKNAME = "微博达人"

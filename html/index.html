@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>评论线索 · 数据展示</title>
+    <link rel="stylesheet" href="/leads/css/style.css">
+</head>
+<body>
+    <div class="page">
+        <!-- 标题区域 -->
+        <header class="page-header">
+            <div>
+                <h1 class="title">评论线索</h1>
+            <p class="subtitle">按关键词采集的评论与视频数据，支持按平台、关键词、内容与时间筛选；抖音号需在新采集数据中由平台返回</p>
+            </div>
+            <span class="refresh" id="btn-refresh" title="重新加载数据">↻ 刷新</span>
+        </header>
+
+        <!-- Tab 切换 -->
+        <nav class="tabs" id="tabs">
+            <button class="tab active" data-tab="comments">评论线索</button>
+            <button class="tab" data-tab="contents">视频内容</button>
+            <button class="tab" data-tab="wordcloud">评论词云</button>
+        </nav>
+
+        <!-- 筛选栏 -->
+        <div class="filters" id="filters">
+            <select id="f-platform" class="input">
+                <option value="">全部平台</option>
+            </select>
+            <select id="f-keyword" class="input">
+                <option value="">全部关键词</option>
+            </select>
+            <input id="f-search" class="input input-search" type="text" placeholder="查找评论内容 / 昵称 / 视频标题">
+
+            <div class="range">
+                <span class="range-label" id="time-label">评论时间</span>
+                <input id="f-time-start" class="input input-date" type="date">
+                <span class="range-sep">至</span>
+                <input id="f-time-end" class="input input-date" type="date">
+            </div>
+
+            <div class="range">
+                <span class="range-label">获取时间</span>
+                <input id="f-fetch-start" class="input input-date" type="date">
+                <span class="range-sep">至</span>
+                <input id="f-fetch-end" class="input input-date" type="date">
+            </div>
+
+            <button id="btn-search" class="btn btn-primary">搜索</button>
+            <button id="btn-reset" class="btn btn-plain">重置</button>
+        </div>
+
+        <!-- 统计 -->
+        <div class="stats" id="stats"></div>
+
+        <!-- 表格 -->
+        <div class="table-wrap">
+            <div class="table-inner">
+                <table class="data-table" id="data-table">
+                    <thead id="table-head"></thead>
+                    <tbody id="table-body"></tbody>
+                </table>
+            </div>
+            <div class="empty" id="empty" hidden>
+                <div class="empty-icon">📭</div>
+                <p id="empty-text">暂无数据</p>
+            </div>
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>正在加载数据…</p>
+            </div>
+        </div>
+
+        <!-- 错误提示 -->
+        <div class="error" id="error" hidden>
+            <p id="error-text"></p>
+        </div>
+
+        <!-- 分页 -->
+        <div class="pagination" id="pagination"></div>
+
+        <!-- 评论词云 -->
+        <section class="wordcloud-panel" id="wordcloud-panel" hidden>
+            <div class="wordcloud-toolbar">
+                <div>
+                    <h2>评论词云</h2>
+                    <p>根据已采集评论的词频生成，文字越大代表出现次数越多。</p>
+                </div>
+                <div class="wordcloud-actions">
+                    <select id="wordcloud-select" class="input"></select>
+                    <button id="btn-wordcloud-refresh" class="btn btn-plain">刷新</button>
+                </div>
+            </div>
+            <div class="wordcloud-content" id="wordcloud-content"></div>
+        </section>
+    </div>
+
+    <script src="/leads/js/app.js"></script>
+</body>
+</html>

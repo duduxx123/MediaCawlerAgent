@@ -18,9 +18,16 @@ import types
 
 import pytest
 
+import config
 import store.kuaishou as ks
 from store.kuaishou import update_kuaishou_video, update_ks_video_comment
 from tools.user_hash import anonymize_user_id, mask_nickname
+
+
+@pytest.fixture(autouse=True)
+def _pin_anonymized_mode(monkeypatch):
+    """本文件验证教学版脱敏路径：固定关闭快手原文落库开关（默认已开启获客模式）。"""
+    monkeypatch.setattr(config, "KS_SAVE_ORIGINAL_USER_INFO", False)
 
 # 教学版禁用字段(键)：一律不得出现在存储 dict 中。
 # 昵称字段 nickname 允许保留，但值须脱敏。

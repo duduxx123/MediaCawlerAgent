@@ -32,3 +32,8 @@ ZHIHU_SPECIFIED_ID_LIST = [
     "https://zhuanlan.zhihu.com/p/673461588",  # article
     "https://www.zhihu.com/zvideo/1539542068422144000",  # video
 ]
+
+# 是否保存原始用户信息（知乎）。True（当前）：落库的用户标识（creator_hash 字段）
+# 与昵称保存原文，用于 AI 获客等需要定位真实用户的场景。False：教学版脱敏（sha256 哈希 + 昵称打码）。
+# 注意：原始用户信息属于个人信息，请仅用于本人授权范围内的合法用途。
+ZHIHU_SAVE_ORIGINAL_USER_INFO = True

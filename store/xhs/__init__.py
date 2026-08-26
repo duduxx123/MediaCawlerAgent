@@ -31,6 +31,20 @@ from .xhs_store_media import *
 from ._store_impl import *
 
 
+def _user_key(raw_id) -> str:
+    """用户标识落库：config.XHS_SAVE_ORIGINAL_USER_INFO=True 时存原文（获客定位真实用户），否则脱敏哈希。"""
+    if config.XHS_SAVE_ORIGINAL_USER_INFO:
+        return str(raw_id or "").strip() or ""
+    return anonymize_user_id(raw_id)
+
+
+def _user_nickname(name) -> str:
+    """昵称落库：开关打开时存原文，否则中间打码。"""
+    if config.XHS_SAVE_ORIGINAL_USER_INFO:
+        return str(name or "")
+    return mask_nickname(name)
+
+
 class XhsStoreFactory:
     STORES = {
         "csv": XhsCsvStoreImplement,
@@ -114,8 +128,8 @@ async def update_xhs_note(note_item: Dict):
         "video_url": video_url,  # Note video url
         "time": note_item.get("time"),  # Note publish time
         "last_update_time": note_item.get("last_update_time", 0),  # Note last update time
-        "creator_hash": anonymize_user_id(user_info.get("user_id")),  # 创作者匿名哈希(不存原始 user_id)
-        "nickname": mask_nickname(user_info.get("nickname")),  # 用户昵称(已脱敏)
+        "creator_hash": _user_key(user_info.get("user_id")),  # 开关打开时存原文 user_id
+        "nickname": _user_nickname(user_info.get("nickname")),  # 开关打开时存原文昵称
         "liked_count": interact_info.get("liked_count"),  # Like count
         "collected_count": interact_info.get("collected_count"),  # Collection count
         "comment_count": interact_info.get("comment_count"),  # Comment count
@@ -166,8 +180,8 @@ async def update_xhs_note_comment(note_id: str, comment_item: Dict):
         "create_time": comment_item.get("create_time"),  # Comment time
         "note_id": note_id,  # Note ID
         "content": comment_item.get("content"),  # Comment content
-        "creator_hash": anonymize_user_id(user_info.get("user_id")),  # 创作者匿名哈希(不存原始 user_id)
-        "nickname": mask_nickname(user_info.get("nickname")),  # 用户昵称(已脱敏)
+        "creator_hash": _user_key(user_info.get("user_id")),  # 开关打开时存原文 user_id
+        "nickname": _user_nickname(user_info.get("nickname")),  # 开关打开时存原文昵称
         "sub_comment_count": comment_item.get("sub_comment_count", 0),  # Sub-comment count
         "pictures": ",".join(comment_pictures),  # Comment pictures
         "parent_comment_id": target_comment.get("id", ""),  # Parent comment ID
