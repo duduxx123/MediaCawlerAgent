@@ -50,7 +50,7 @@ BANNER = """
 ============================================================
   MediaCrawler 爬虫智能体 (LangChain + DeepSeek)
 ============================================================
-  支持平台: 抖音 / 小红书 / B站
+  支持平台: 抖音 / 小红书 / 快手 / B站 / 微博 / 贴吧 / 知乎
   命令: /exit 退出 | /clear 清空对话记忆 | /tools 工具清单
   提示: 首次在某平台抓取时，会自动打开/复用 Chrome 浏览器，
         请扫码登录一次（登录态会保存到本地）。
@@ -120,9 +120,15 @@ async def main(single_message: Optional[str] = None) -> None:
             await _run_chat(cmd)
             print("\n")
     finally:
-        # 退出前优雅关闭单例 bot 的 CDP 连接，避免残留半开连接导致下次连接失败
+        # 退出前优雅关闭各写操作 bot 的 CDP/内存状态，避免残留连接或私信草稿
+        from agent.tools.bili_comment_tools import cleanup_bot as cleanup_bili_bot
         from agent.tools.comment_tools import cleanup_bot
+        from agent.tools.kuaishou_comment_tools import cleanup_bot as cleanup_ks_comment_bot
+        from agent.tools.xhs_dm_tools import cleanup_bot as cleanup_xhs_dm_bot
         await cleanup_bot()
+        await cleanup_bili_bot()
+        await cleanup_ks_comment_bot()
+        await cleanup_xhs_dm_bot()
 
 
 if __name__ == "__main__":

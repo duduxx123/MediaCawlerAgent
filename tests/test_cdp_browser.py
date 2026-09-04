@@ -7,6 +7,30 @@ import config
 from tools.cdp_browser import CDPBrowserManager
 
 
+def test_cleanup_registration_skips_signals_outside_main_thread(monkeypatch):
+    manager = CDPBrowserManager()
+    registered = []
+    worker_thread = MagicMock()
+    worker_thread.name = "agent-worker"
+    main_thread = MagicMock()
+    main_thread.name = "MainThread"
+
+    monkeypatch.setattr("tools.cdp_browser.atexit.register", registered.append)
+    monkeypatch.setattr("tools.cdp_browser.threading.current_thread", lambda: worker_thread)
+    monkeypatch.setattr("tools.cdp_browser.threading.main_thread", lambda: main_thread)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("后台线程不应调用 signal API")
+
+    monkeypatch.setattr("tools.cdp_browser.signal.getsignal", fail_if_called)
+    monkeypatch.setattr("tools.cdp_browser.signal.signal", fail_if_called)
+
+    manager._register_cleanup_handlers()
+
+    assert manager._cleanup_registered is True
+    assert len(registered) == 1
+
+
 @pytest.mark.asyncio
 async def test_existing_browser_connects_directly_to_devtools_browser(monkeypatch):
     monkeypatch.setattr(config, "CDP_CONNECT_EXISTING", True)

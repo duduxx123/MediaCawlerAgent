@@ -63,17 +63,16 @@ def _comment_sec_uid(user_info: Dict) -> str:
 
 
 def _comment_identity_fields(user_info: Dict) -> Dict[str, str]:
-    """Extra identity fields for file-based stores used by the leads UI.
+    """Extra public identity fields when original Douyin info is enabled.
 
-    Database schemas are intentionally left unchanged; adding these fields to a
-    database deployment requires a corresponding migration.
+    ``douyin_id`` is a public profile handle (unique_id/short_id), while
+    ``creator_hash`` continues to carry the stable sec_uid/hash compatibility
+    value used by existing action code.
     """
-    if (not config.DY_SAVE_ORIGINAL_USER_INFO or
-            config.SAVE_DATA_OPTION not in {"json", "jsonl", "csv", "excel"}):
+    if not config.DY_SAVE_ORIGINAL_USER_INFO:
         return {}
     return {
         "douyin_id": _comment_douyin_id(user_info),
-        "sec_uid": _comment_sec_uid(user_info),
     }
 
 
@@ -94,7 +93,8 @@ class DouyinStoreFactory:
         store_class = DouyinStoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
             raise ValueError("[DouyinStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
-        return store_class()
+        from ..dual_write_store import maybe_dual_write
+        return maybe_dual_write(store_class(), DouyinStoreFactory.STORES["sqlite"])
 
 
 def _extract_note_image_list(aweme_detail: Dict) -> List[str]:

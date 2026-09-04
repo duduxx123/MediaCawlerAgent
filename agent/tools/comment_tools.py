@@ -24,7 +24,7 @@
   send_dm_user        —— CDP 向指定用户发送私信（填框+发送+聊天记录自检）
 
 底层复用 media_platform/douyin/comment_bot.py 的 DouyinCommentBot：
-  - CDP 连接用户正在运行的 Chrome（DevToolsActivePort 文件地址直连，复用登录态）
+  - 浏览器来源遵循 CDP_CONNECT_EXISTING；打包客户端使用自己的独立 profile
   - 单例懒加载 + 全局限流锁（CDP 页面共享，读写串行）
   - 工具函数内捕获全部异常并返回紧凑中文 JSON（langgraph 1.x 工具抛异常会击穿 agent）
 """
@@ -38,6 +38,7 @@ from typing import Any, Dict, Optional
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+import config
 from media_platform.douyin.comment_bot import DouyinCommentBot
 
 # 单例 bot 与串行锁：CDP 连接/页面是共享资源，同一时刻只允许一个操作
@@ -56,10 +57,14 @@ _CONNECTION_ERROR_RE = re.compile(
 def _is_connection_error(e: BaseException) -> bool:
     return bool(_CONNECTION_ERROR_RE.search(str(e)))
 
-_HINT_CDP = ("请确认用户已运行开启远程调试的 Chrome 且已登录抖音，并在 Chrome 弹窗中点击『允许』"
-             "（自动连接模式下每次新连接都要点一次允许）。工具会自动打开并激活评论区"
-             "（图集帖会自动点击右侧『评论(N)』Tab）；若仍失败，可让用户在 Chrome 里手动点开『评论(N)』后再重试。"
-             "操作期间请保持目标标签页在前台（后台标签页动画节流会拖慢页面加载）。")
+_HINT_CDP_EXISTING = ("请确认用户已运行开启远程调试的 Chrome 且已登录抖音，并在 Chrome 弹窗中点击『允许』。"
+                      "工具会自动打开并激活评论区；若仍失败，可在 Chrome 里手动点开评论区后重试。")
+_HINT_CDP_SELF = ("客户端独立抖音浏览器会自动启动，不需要连接本机正在使用的 Chrome，也不需要授权 9222。"
+                  "若提示未登录，请在客户端打开的独立浏览器中登录抖音后重试；登录态保存在 exe 旁的 browser_data 中。")
+
+
+def _hint_cdp() -> str:
+    return _HINT_CDP_EXISTING if config.CDP_CONNECT_EXISTING else _HINT_CDP_SELF
 
 _HINT_REPLY_NOT_FOUND = ("热门视频评论区是动态热排序，序号可能漂移。"
                          "请勿对同一目标反复重试：先用 fetch_comment_users 重新抓取，"
@@ -177,7 +182,7 @@ sec_uid 是评论者的唯一标识，回复时必须原样传递。仅读取数
     except Exception as e:
         if _is_connection_error(e):
             await _reset_bot()
-        return _error_json(f"{type(e).__name__}: {e}", _HINT_CDP)
+        return _error_json(f"{type(e).__name__}: {e}", _hint_cdp())
 
 
 class PostCommentArgs(BaseModel):
@@ -206,7 +211,7 @@ async def post_comment(video_url: str, content: str) -> str:
     except Exception as e:
         if _is_connection_error(e):
             await _reset_bot()
-        return _error_json(f"{type(e).__name__}: {e}", _HINT_CDP)
+        return _error_json(f"{type(e).__name__}: {e}", _hint_cdp())
 
 
 class ReplyCommentArgs(BaseModel):
@@ -254,7 +259,7 @@ async def reply_comment(video_url: str, sec_uid: str, content: str, comment_inde
             await _reset_bot()
         return _error_json(
             f"{type(e).__name__}: {e}",
-            _HINT_CDP + " 若提示找不到目标评论：" + _HINT_REPLY_NOT_FOUND,
+            _hint_cdp() + " 若提示找不到目标评论：" + _HINT_REPLY_NOT_FOUND,
         )
 
 
@@ -285,4 +290,4 @@ async def send_dm_user(sec_uid: str, content: str) -> str:
     except Exception as e:
         if _is_connection_error(e):
             await _reset_bot()
-        return _error_json(f"{type(e).__name__}: {e}", _HINT_CDP)
+        return _error_json(f"{type(e).__name__}: {e}", _hint_cdp())

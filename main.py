@@ -117,9 +117,12 @@ async def main() -> None:
         print(f"Database {args.init_db} initialized successfully.")
         return
 
-    # 数据库保存模式下自动建表，避免首次运行时出现 no such table 错误
+    # 数据库保存模式下自动建表；文件模式开启镜像时也建 SQLite 表，
+    # 避免镜像写入 / leads 读取时出现 no such table 错误
     if config.SAVE_DATA_OPTION in ("sqlite", "mysql", "db", "postgres"):
         await db.init_db(config.SAVE_DATA_OPTION)
+    elif config.ENABLE_SQLITE_MIRROR:
+        await db.init_db("sqlite")
 
     crawler = CrawlerFactory.create_crawler(platform=config.PLATFORM)
     await crawler.start()
@@ -150,7 +153,7 @@ async def async_cleanup() -> None:
                 if "closed" not in error_msg and "disconnected" not in error_msg:
                     print(f"[Main] Error closing browser context: {e}")
 
-    if config.SAVE_DATA_OPTION in ("db", "sqlite"):
+    if config.SAVE_DATA_OPTION in ("db", "sqlite") or config.ENABLE_SQLITE_MIRROR:
         await db.close()
 
 if __name__ == "__main__":

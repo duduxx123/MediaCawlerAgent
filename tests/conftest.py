@@ -35,6 +35,14 @@ def project_root_path():
     return project_root
 
 
+@pytest.fixture(autouse=True)
+def _sqlite_mirror_off_by_default(monkeypatch):
+    """默认关闭镜像双写：既有存储/工厂测试（test_store_factory、FakeStore 替换、no_user_info 系列）
+    不受镜像写库影响；镜像行为由专门测试（test_dual_write_store 等）自行开启。"""
+    import config
+    monkeypatch.setattr(config, "ENABLE_SQLITE_MIRROR", False)
+
+
 @pytest.fixture
 def sample_xhs_note():
     """Sample Xiaohongshu note data for testing"""
@@ -47,6 +55,7 @@ def sample_xhs_note():
         "time": 1700000000,
         "last_update_time": 1700000000,
         "user_id": "user_123",
+        "red_id": "public_note_123",
         "nickname": "Test User",
         "avatar": "https://example.com/avatar.jpg",
         "liked_count": 100,
@@ -72,6 +81,7 @@ def sample_xhs_comment():
         "note_id": "test_note_123",
         "content": "This is a test comment",
         "user_id": "user_456",
+        "red_id": "public_comment_456",
         "nickname": "Comment User",
         "avatar": "https://example.com/avatar2.jpg",
         "sub_comment_count": 5,

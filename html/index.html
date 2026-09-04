@@ -12,7 +12,7 @@
         <header class="page-header">
             <div>
                 <h1 class="title">评论线索</h1>
-            <p class="subtitle">按关键词采集的评论与视频数据，支持按平台、关键词、内容与时间筛选；抖音号需在新采集数据中由平台返回</p>
+            <p class="subtitle">按关键词采集的评论与视频数据；公开平台账号用于展示，内部用户ID保留给回复和私信定位</p>
             </div>
             <span class="refresh" id="btn-refresh" title="重新加载数据">↻ 刷新</span>
         </header>
@@ -22,6 +22,7 @@
             <button class="tab active" data-tab="comments">评论线索</button>
             <button class="tab" data-tab="contents">视频内容</button>
             <button class="tab" data-tab="wordcloud">评论词云</button>
+            <button class="tab" data-tab="agent">智能体对话</button>
         </nav>
 
         <!-- 筛选栏 -->
@@ -52,8 +53,11 @@
             <button id="btn-reset" class="btn btn-plain">重置</button>
         </div>
 
-        <!-- 统计 -->
-        <div class="stats" id="stats"></div>
+        <!-- 统计 + 批量删除 -->
+        <div class="stats-row">
+            <div class="stats" id="stats"></div>
+            <button id="btn-batch-delete" class="btn btn-danger" hidden disabled>批量删除（已选 0 条）</button>
+        </div>
 
         <!-- 表格 -->
         <div class="table-wrap">
@@ -90,13 +94,34 @@
                 </div>
                 <div class="wordcloud-actions">
                     <select id="wordcloud-select" class="input"></select>
+                    <button id="btn-wordcloud-generate" class="btn btn-primary">生成词云</button>
                     <button id="btn-wordcloud-refresh" class="btn btn-plain">刷新</button>
                 </div>
             </div>
             <div class="wordcloud-content" id="wordcloud-content"></div>
         </section>
+
+        <!-- 智能体对话 -->
+        <section class="agent-panel" id="agent-panel" hidden>
+            <div class="agent-header">
+                <div>
+                    <h2>智能体对话</h2>
+                    <p>可调用七平台爬取、数据读取以及已接入的平台互动工具。</p>
+                </div>
+                <span class="agent-status" id="agent-status">连接中…</span>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-empty" id="chat-empty">发送消息开始对话。智能体会按需调用当前项目中的工具。</div>
+            </div>
+            <div class="chat-error" id="chat-error" hidden></div>
+            <div class="chat-input-row">
+                <textarea id="chat-input" class="chat-textarea" rows="2"
+                    placeholder="输入任务…（Enter 发送，Shift+Enter 换行）"></textarea>
+                <button id="chat-send" class="btn btn-primary chat-send-btn">发送</button>
+            </div>
+        </section>
     </div>
 
-    <script src="/leads/js/app.js"></script>
+    <script src="/leads/js/app.js?v=20260904"></script>
 </body>
 </html>

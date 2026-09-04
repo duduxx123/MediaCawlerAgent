@@ -25,6 +25,7 @@ import asyncio
 import os
 import sys
 import subprocess
+from contextlib import asynccontextmanager
 from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
@@ -32,15 +33,62 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 
+import config
 from .routers import crawler_router, data_router, leads_router, websocket_router, agent_router
 
 # Project root directory (used for running subprocesses like uv run main.py)
 PROJECT_ROOT = Path(__file__).parent.parent
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """启动时保证数据表存在：API 进程不经过 main.py，读库/删库前必须先建表；
+    create_all 幂等，重复执行无害。"""
+    try:
+        if config.SAVE_DATA_OPTION in ("sqlite", "db", "mysql", "postgres"):
+            from database import db
+
+            await db.init_db(config.SAVE_DATA_OPTION)
+        elif config.ENABLE_SQLITE_MIRROR:
+            from database import db
+
+            await db.init_db("sqlite")
+    except Exception as e:  # 建表失败不阻断服务启动（读接口会返回空，日志可见原因）
+        print(f"[api] init_db skipped: {e}")
+
+    # 可选：历史 jsonl 数据自动迁移（需环境变量 AUTO_MIGRATE_JSONL=1，marker 保证只迁一次）
+    if os.environ.get("AUTO_MIGRATE_JSONL", "") == "1":
+        try:
+            from tools.migrate_jsonl_to_sqlite import run_if_needed
+
+            await run_if_needed()
+        except Exception as e:
+            print(f"[api] jsonl migration skipped: {e}")
+    try:
+        yield
+    finally:
+        # 只清理本进程中实际加载过的写操作机器人；断开 CDP，并清空 B站 Cookie / 小红书草稿等内存状态。
+        # 使用 sys.modules 避免从未使用智能体时仅因服务关闭而额外导入 Playwright/LangChain。
+        for module_name in (
+            "agent.tools.comment_tools",
+            "agent.tools.bili_comment_tools",
+            "agent.tools.kuaishou_comment_tools",
+            "agent.tools.xhs_dm_tools",
+        ):
+            module = sys.modules.get(module_name)
+            cleanup = getattr(module, "cleanup_bot", None) if module else None
+            if cleanup is not None:
+                try:
+                    await cleanup()
+                except Exception as e:
+                    print(f"[api] bot cleanup skipped ({module_name}): {e}")
+
+
 app = FastAPI(
     title="MediaCrawler WebUI API",
     description="API for controlling MediaCrawler from WebUI",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Get webui static files directory

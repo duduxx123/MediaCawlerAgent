@@ -66,6 +66,11 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
+        self._red_id_cache: Dict[str, str] = {}
+        self._red_id_fetch_count = 0
+        self._red_id_semaphore = asyncio.Semaphore(
+            max(1, int(getattr(config, "XHS_PUBLIC_RED_ID_MAX_CONCURRENCY", 1)))
+        )
 
     async def start(self) -> None:
         playwright_proxy_format, httpx_proxy_format = None, None
@@ -175,7 +180,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     note_details = await asyncio.gather(*task_list)
                     for note_detail in note_details:
                         if note_detail:
-                            await xhs_store.update_xhs_note(note_detail)
+                            await self._store_note_with_red_id(note_detail)
                             await self.get_notice_media(note_detail)
                             note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
@@ -252,7 +257,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         note_details = await asyncio.gather(*task_list)
         for note_detail in note_details:
             if note_detail:
-                await xhs_store.update_xhs_note(note_detail)
+                await self._store_note_with_red_id(note_detail)
                 await self.get_notice_media(note_detail)
 
     async def get_specified_notes(self):
@@ -279,7 +284,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
             if note_detail:
                 need_get_comment_note_ids.append(note_detail.get("note_id", ""))
                 xsec_tokens.append(note_detail.get("xsec_token", ""))
-                await xhs_store.update_xhs_note(note_detail)
+                await self._store_note_with_red_id(note_detail)
                 await self.get_notice_media(note_detail)
         await self.batch_get_note_comments(need_get_comment_note_ids, xsec_tokens)
 
@@ -370,13 +375,89 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 note_id=note_id,
                 xsec_token=xsec_token,
                 crawl_interval=crawl_interval,
-                callback=xhs_store.batch_update_xhs_note_comments,
+                callback=self._store_comments_with_red_id,
                 max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
             )
 
             # Sleep after fetching comments
             await asyncio.sleep(crawl_interval)
             utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Sleeping for {crawl_interval} seconds after fetching comments for note {note_id}")
+
+    @staticmethod
+    def _extract_red_id(record: Optional[Dict]) -> str:
+        """从评论用户对象或主页 userPageData 中兼容提取 redId/red_id。"""
+        if not isinstance(record, dict):
+            return ""
+        for key in ("red_id", "redId", "reds_id", "redsId"):
+            value = str(record.get(key) or "").strip()
+            if value:
+                return value
+        for key in ("basicInfo", "basic_info", "userInfo", "user_info"):
+            value = XiaoHongShuCrawler._extract_red_id(record.get(key))
+            if value:
+                return value
+        return ""
+
+    async def _resolve_red_id(self, user_info: Dict) -> str:
+        """按内部 user_id 去重补取公开小红书号；任何失败都降级为空，不中断爬虫。"""
+        direct = self._extract_red_id(user_info)
+        if direct:
+            return direct
+        if not (
+            config.XHS_SAVE_ORIGINAL_USER_INFO
+            and getattr(config, "XHS_FETCH_PUBLIC_RED_ID", True)
+        ):
+            return ""
+        user_id = str((user_info or {}).get("user_id") or "").strip()
+        if not user_id:
+            return ""
+        if user_id in self._red_id_cache:
+            return self._red_id_cache[user_id]
+
+        async with self._red_id_semaphore:
+            if user_id in self._red_id_cache:
+                return self._red_id_cache[user_id]
+            max_users = int(getattr(config, "XHS_PUBLIC_RED_ID_MAX_USERS_PER_RUN", 100) or 0)
+            if max_users > 0 and self._red_id_fetch_count >= max_users:
+                self._red_id_cache[user_id] = ""
+                return ""
+            self._red_id_fetch_count += 1
+            red_id = ""
+            try:
+                profile = await self.xhs_client.get_creator_info(
+                    user_id=user_id,
+                    xsec_token=str(user_info.get("xsec_token") or ""),
+                    xsec_source="pc_comment" if user_info.get("xsec_token") else "",
+                )
+                red_id = self._extract_red_id(profile)
+            except Exception as ex:
+                utils.logger.warning(
+                    f"[XiaoHongShuCrawler._resolve_red_id] Failed to resolve public red_id "
+                    f"for user_id={user_id}: {ex}"
+                )
+            self._red_id_cache[user_id] = red_id
+            interval = float(getattr(config, "XHS_PUBLIC_RED_ID_FETCH_INTERVAL", 0.4) or 0)
+            if interval > 0:
+                await asyncio.sleep(interval)
+            return red_id
+
+    async def _enrich_user_info(self, user_info: Dict) -> None:
+        if not isinstance(user_info, dict):
+            return
+        red_id = await self._resolve_red_id(user_info)
+        if red_id:
+            user_info["red_id"] = red_id
+
+    async def _store_note_with_red_id(self, note_detail: Dict) -> None:
+        await self._enrich_user_info(note_detail.get("user", {}))
+        await xhs_store.update_xhs_note(note_detail)
+
+    async def _store_comments_with_red_id(self, note_id: str, comments: List[Dict]) -> None:
+        await asyncio.gather(*(
+            self._enrich_user_info(comment.get("user_info", {}))
+            for comment in comments
+        ))
+        await xhs_store.batch_update_xhs_note_comments(note_id, comments)
 
     async def create_xhs_client(self, httpx_proxy: Optional[str]) -> XiaoHongShuClient:
         """Create Xiaohongshu client"""

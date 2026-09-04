@@ -141,6 +141,69 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         json_str = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
         return await self.request(method="POST", url=f"{self._host}{uri}", data=json_str, headers=self.headers)
 
+    async def post_comment_reply(
+        self,
+        type: int,
+        oid: int,
+        message: str,
+        csrf: str,
+        root: Optional[int] = None,
+        parent: Optional[int] = None,
+        plat: int = 1,
+    ) -> Dict:
+        """发评论/楼中楼回复：POST /x/v2/reply/add（表单，无 wbi 签名——参考实现验证）。
+
+        顶层评论 root/parent 均为 None（字段整体省略）；楼中楼 root=根评论 rpid、
+        parent=被回复评论 rpid。不复用 request()（它 code!=0 抛 DataFetchError 会丢
+        need_captcha 等业务细节），原样返回完整响应 JSON 由调用方分类。
+        """
+        form: Dict[str, Any] = {"type": type, "oid": oid, "message": message, "plat": plat, "csrf": csrf}
+        if root is not None:
+            form["root"] = root
+        if parent is not None:
+            form["parent"] = parent
+        await self._refresh_proxy_if_expired()
+        async with make_async_client(proxy=self.proxy) as client:
+            response = await client.request(
+                "POST",
+                f"{self._host}/x/v2/reply/add",
+                data=form,
+                timeout=self.timeout,
+                headers={**self.headers, "Content-Type": "application/x-www-form-urlencoded"},
+            )
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            raise DataFetchError(f"Failed to decode JSON, content: {response.text}")
+
+    async def get_dynamic_detail(self, dynamic_id: str) -> Dict:
+        """动态/opus 详情（无签名）：GET /x/polymer/web-dynamic/v1/detail。
+
+        返回 data：item.basic.comment_type / comment_id(_str) 用于发评论定位目标。
+        """
+        return await self.get(
+            "/x/polymer/web-dynamic/v1/detail",
+            {"id": dynamic_id, "features": "itemOpusStyle"},
+            enable_params_sign=False,
+        )
+
+    async def get_comment_list(
+        self, type: int, oid: int, sort: int = 0, pn: int = 1, ps: int = 20
+    ) -> Dict:
+        """评论列表（非 wbi 版，发评论后自检用）：GET /x/v2/reply。"""
+        return await self.get(
+            "/x/v2/reply",
+            {"type": type, "oid": oid, "sort": sort, "pn": pn, "ps": ps},
+            enable_params_sign=False,
+        )
+
+    async def get_login_state(self) -> Dict:
+        """登录态检查（无签名）：GET /x/web-interface/nav → data.isLogin。
+
+        替代 pong()——pong 走 wbi 签名、依赖 playwright_page，本 bot 的 client page=None。
+        """
+        return await self.get("/x/web-interface/nav", enable_params_sign=False)
+
     async def pong(self) -> bool:
         """get a note to check if login state is ok"""
         utils.logger.info("[BilibiliClient.pong] Begin pong bilibili...")

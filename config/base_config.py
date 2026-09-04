@@ -89,6 +89,11 @@ AUTO_CLOSE_BROWSER = True
 # Data saving type option configuration, supports: csv, db, json, jsonl, sqlite, excel, postgres. It is best to save to DB, with deduplication function.
 SAVE_DATA_OPTION = "jsonl"  # csv or db or json or jsonl or sqlite or excel or postgres
 
+# 文件保存模式（jsonl/json/csv）下同时镜像写入 SQLite（database/sqlite_tables.db），
+# 供 /leads 数据展示页查询、评论批量删除与 agent 数据工具读取。
+# 词云与现有 jsonl 文件读取方不受影响；SAVE_DATA_OPTION 为 db/sqlite/postgres/mongodb/excel 时本开关不生效。
+ENABLE_SQLITE_MIRROR = True
+
 # Data saving path, if not specified by default, it will be saved to the data folder.
 SAVE_DATA_PATH = ""
 

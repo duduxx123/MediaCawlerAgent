@@ -183,10 +183,21 @@ agent_zone
 debug_tools
 
 database/*.db
+database/*.db-wal
+database/*.db-shm
+database/*.db-journal
+*.sqlite
+*.sqlite3
+/memory/
+/logs/
 .omx/
 
 # ===== 本地开发（个人工作区） =====
 # 一次性调试探针脚本/日志/截图/爬取断点文件
 /tmp_*
+/.tmp_*/
+/.pytest-tmp*/
 # 本地 Claude Code 配置
 /.claude/
+# 客户端构建时生成（内含 LLM API Key，严禁提交）
+client_secrets.py

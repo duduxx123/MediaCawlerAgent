@@ -45,7 +45,8 @@ class TieBaStoreFactory:
         if not store_class:
             raise ValueError(
                 "[TieBaStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
-        return store_class()
+        from ..dual_write_store import maybe_dual_write
+        return maybe_dual_write(store_class(), TieBaStoreFactory.STORES["sqlite"])
 
 
 async def batch_update_tieba_notes(note_list: List[TiebaNote]):

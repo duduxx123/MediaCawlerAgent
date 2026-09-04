@@ -67,8 +67,12 @@ class KuaishouLogin(AbstractLogin):
         """
         current_cookie = await self.browser_context.cookies()
         _, cookie_dict = utils.convert_cookies(current_cookie)
-        kuaishou_pass_token = cookie_dict.get("passToken")
-        if kuaishou_pass_token:
+        login_token = (
+            cookie_dict.get("passToken")
+            or cookie_dict.get("kuaishou.server.web_st")
+            or cookie_dict.get("kuaishou.server.webday7_st")
+        )
+        if cookie_dict.get("userId") and login_token:
             return True
         return False
 

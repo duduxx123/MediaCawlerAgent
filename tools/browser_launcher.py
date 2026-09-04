@@ -125,7 +125,7 @@ class BrowserLauncher:
         args = [
             browser_path,
             f"--remote-debugging-port={debug_port}",
-            "--remote-debugging-address=0.0.0.0",  # Allow remote access
+            "--remote-debugging-address=127.0.0.1",  # 仅本机访问调试端口，避免暴露到局域网
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-background-timer-throttling",
@@ -256,20 +256,20 @@ class BrowserLauncher:
 
         try:
             if self.system == "Windows":
-                # First try normal termination
-                process.terminate()
+                # Chrome 是多进程：terminate() 只杀主进程，会残留渲染进程占用
+                # user-data-dir 锁（下次同 profile 启动会复用旧进程、调试端口失效）。
+                # 直接 taskkill /F /T 杀整棵进程树，确保 profile 锁被彻底释放。
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                    capture_output=True,
+                    check=False,
+                    encoding='utf-8',
+                    errors='ignore'
+                )
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    utils.logger.warning("[BrowserLauncher] Normal termination timeout, using taskkill to force kill")
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                        capture_output=True,
-                        check=False,
-                        encoding='utf-8',
-                        errors='ignore'
-                    )
-                    process.wait(timeout=5)
+                    utils.logger.warning("[BrowserLauncher] taskkill 后进程仍未退出")
             else:
                 pgid = os.getpgid(process.pid)
                 try:

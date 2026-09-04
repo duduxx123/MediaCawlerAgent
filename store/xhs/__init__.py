@@ -45,6 +45,17 @@ def _user_nickname(name) -> str:
     return mask_nickname(name)
 
 
+def _public_red_id(user_info: Dict) -> str:
+    """提取用户可见的小红书号；关闭原始用户信息时不持久化。"""
+    if not config.XHS_SAVE_ORIGINAL_USER_INFO or not isinstance(user_info, dict):
+        return ""
+    for key in ("red_id", "redId", "reds_id", "redsId"):
+        value = str(user_info.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 class XhsStoreFactory:
     STORES = {
         "csv": XhsCsvStoreImplement,
@@ -62,7 +73,8 @@ class XhsStoreFactory:
         store_class = XhsStoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
             raise ValueError("[XhsStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
-        return store_class()
+        from ..dual_write_store import maybe_dual_write
+        return maybe_dual_write(store_class(), XhsStoreFactory.STORES["sqlite"])
 
 
 def get_video_url_arr(note_item: Dict) -> List:
@@ -129,6 +141,7 @@ async def update_xhs_note(note_item: Dict):
         "time": note_item.get("time"),  # Note publish time
         "last_update_time": note_item.get("last_update_time", 0),  # Note last update time
         "creator_hash": _user_key(user_info.get("user_id")),  # 开关打开时存原文 user_id
+        "red_id": _public_red_id(user_info),  # 用户可见的小红书号
         "nickname": _user_nickname(user_info.get("nickname")),  # 开关打开时存原文昵称
         "liked_count": interact_info.get("liked_count"),  # Like count
         "collected_count": interact_info.get("collected_count"),  # Collection count
@@ -181,6 +194,7 @@ async def update_xhs_note_comment(note_id: str, comment_item: Dict):
         "note_id": note_id,  # Note ID
         "content": comment_item.get("content"),  # Comment content
         "creator_hash": _user_key(user_info.get("user_id")),  # 开关打开时存原文 user_id
+        "red_id": _public_red_id(user_info),  # 用户可见的小红书号
         "nickname": _user_nickname(user_info.get("nickname")),  # 开关打开时存原文昵称
         "sub_comment_count": comment_item.get("sub_comment_count", 0),  # Sub-comment count
         "pictures": ",".join(comment_pictures),  # Comment pictures

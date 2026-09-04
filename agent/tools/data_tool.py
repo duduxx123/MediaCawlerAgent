@@ -18,35 +18,39 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 """
-2 个数据读取工具：读取已抓取的内容数据 / 列出数据文件。
-只读本地 data 目录，不发起任何网络请求。
+2 个数据读取工具：读取已抓取的内容数据 / 列出数据表统计。
+只读本地 SQLite 数据库（database/sqlite_tables.db），不发起任何网络请求。
 """
 
 import json
-from collections import deque
+import sqlite3
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from ..services.crawler_runner import (
-    DATA_DIR,
-    PLATFORM_DATA_DIR,
-    _count_records,
+    SQLITE_TABLE_MAP,
     extract_compact_record,
     normalize_platform,
 )
 
-MAX_SCAN_LINES = 20_000  # 单文件最大扫描行数，防超大文件卡死
+MAX_SCAN_LINES = 20_000  # 单表最大扫描行数，防超大表卡死
 MAX_LIST_FILES = 30
+
+
+def _db_path() -> str:
+    """SQLite 数据库路径（与 config/db_config.py 同源；测试可 monkeypatch sqlite_db_config）。"""
+    from config.db_config import sqlite_db_config
+
+    return sqlite_db_config["db_path"]
 
 
 class ReadCrawledDataArgs(BaseModel):
     """读取已抓取数据的参数"""
 
-    platform: str = Field(description="目标平台，可选值: douyin(抖音) / xhs(小红书) / bilibili(B站)，也接受缩写 dy/bili")
+    platform: str = Field(description="目标平台，可选值: 抖音、小红书、快手、B站、微博、贴吧、知乎，也接受英文名或平台缩写")
     crawler_type: str = Field(default="search", description="抓取模式: search(关键词搜索) / detail(详情) / creator(创作者)")
     limit: int = Field(default=10, ge=1, le=50, description="最多返回条数")
     keyword_filter: str = Field(default="", description="按标题/描述过滤的关键词，空字符串表示不过滤")
@@ -55,22 +59,24 @@ class ReadCrawledDataArgs(BaseModel):
 class ListCrawledFilesArgs(BaseModel):
     """列出数据文件的参数"""
 
-    platform: str = Field(default="", description="目标平台（douyin/xhs/bilibili，也接受 dy/bili），空字符串表示列出全部平台")
+    platform: str = Field(default="", description="目标平台（抖音、小红书、快手、B站、微博、贴吧、知乎），空字符串表示列出全部平台")
 
 
-def _latest_contents_file(platform: str, crawler_type: str) -> Optional[Path]:
-    """找到指定平台/模式最新的 contents jsonl 文件。"""
+def _read_latest_contents_db(platform_cli_key: str, limit: int) -> List[Dict[str, Any]]:
+    """读取平台内容表最新记录（按 add_ts 倒序）；库/表不存在返回空列表。"""
+    tables = SQLITE_TABLE_MAP.get(platform_cli_key)
+    if tables is None:
+        return []
+    contents_table = tables[0]
     try:
-        dir_name = PLATFORM_DATA_DIR[normalize_platform(platform)]
-    except ValueError:
-        return None
-    base_dir = DATA_DIR / dir_name / "jsonl"
-    if not base_dir.is_dir():
-        return None
-    candidates = list(base_dir.glob(f"{crawler_type}_contents_*.jsonl"))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+        with sqlite3.connect(_db_path()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"SELECT * FROM {contents_table} ORDER BY add_ts DESC LIMIT {limit}"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [dict(row) for row in rows]
 
 
 @tool(args_schema=ReadCrawledDataArgs)
@@ -80,92 +86,96 @@ async def read_crawled_data(
     limit: int = 10,
     keyword_filter: str = "",
 ) -> str:
-    """读取已抓取保存的内容数据（jsonl 格式），返回紧凑摘要供分析。
-不会发起新的抓取，仅读取本地 data 目录中已有的数据文件。"""
-    file_path = _latest_contents_file(platform, crawler_type)
-    if file_path is None:
+    """读取已抓取保存的内容数据（本地 SQLite 数据库），返回紧凑摘要供分析。
+不会发起新的抓取，仅读取数据库中的已有数据。数据库模式不再区分抓取模式（search/detail/creator 同表存储）。"""
+    try:
+        platform_cli_key = normalize_platform(platform)
+    except ValueError:
+        return json.dumps(
+            {"ok": False, "message": "平台参数无效，可选值: 抖音、小红书、快手、B站、微博、贴吧、知乎，也接受英文名或平台缩写"},
+            ensure_ascii=False,
+        )
+
+    raw_rows = _read_latest_contents_db(platform_cli_key, MAX_SCAN_LINES)
+    if not raw_rows:
         return json.dumps(
             {
                 "ok": False,
-                "message": "未找到已抓取的数据文件。可先调用 crawl_by_keywords 抓取内容后再读取。",
+                "message": "本地数据库中没有该平台的内容数据。可先调用 crawl_by_keywords 抓取内容后再读取。",
             },
             ensure_ascii=False,
         )
 
     records: List[Dict[str, Any]] = []
     filter_lower = keyword_filter.strip().lower()
-    try:
-        # 数据文件按日期命名、同一天多次抓取会 append，故从文件尾部读最新记录（倒序）
-        buf: deque = deque(maxlen=MAX_SCAN_LINES)
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                buf.append(line)
-        for line in reversed(buf):
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
+    # 按 add_ts 倒序即最新记录在前，配合 limit 返回最近抓取的内容
+    for row in raw_rows:
+        if filter_lower:
+            haystack = (
+                f"{row.get('title', '')} {row.get('desc', '')} "
+                f"{row.get('nickname', '')} {row.get('user_nickname', '')}"
+            ).lower()
+            if filter_lower not in haystack:
                 continue
-            if filter_lower:
-                haystack = f"{record.get('title', '')} {record.get('desc', '')} {record.get('nickname', '')}".lower()
-                if filter_lower not in haystack:
-                    continue
-            records.append(extract_compact_record(record))
-            if len(records) >= limit:
-                break
-    except OSError as e:
-        return json.dumps({"ok": False, "message": f"读取数据文件失败: {e}"}, ensure_ascii=False)
+        records.append(extract_compact_record(row))
+        if len(records) >= limit:
+            break
 
+    table = SQLITE_TABLE_MAP[platform_cli_key][0]
     if not records:
         return json.dumps(
-            {"ok": True, "file": str(file_path.relative_to(DATA_DIR)), "total": 0,
-             "message": "文件中没有匹配的记录" + (f"（过滤词: {keyword_filter}）" if keyword_filter else "")},
+            {"ok": True, "table": table, "total": 0,
+             "message": "数据库中没有匹配的记录" + (f"（过滤词: {keyword_filter}）" if keyword_filter else "")},
             ensure_ascii=False,
         )
     return json.dumps(
-        {"ok": True, "file": str(file_path.relative_to(DATA_DIR)), "total": len(records), "records": records},
+        {"ok": True, "table": table, "total": len(records), "records": records},
         ensure_ascii=False,
     )
 
 
 @tool(args_schema=ListCrawledFilesArgs)
 async def list_crawled_files(platform: str = "") -> str:
-    """列出 data 目录下已抓取的数据文件（路径、大小、记录数、修改时间），按修改时间倒序。
-platform 为空则列出全部平台的数据文件。不会发起新的抓取。"""
-    files: List[Dict[str, Any]] = []
+    """列出本地 SQLite 数据库中各平台的数据表（表名、记录数、最近写入时间），按记录数倒序。
+platform 为空则列出全部平台。不会发起新的抓取。"""
     try:
         if platform:
-            dir_names = [PLATFORM_DATA_DIR[normalize_platform(platform)]]
+            cli_keys = [normalize_platform(platform)]
         else:
-            dir_names = sorted(set(PLATFORM_DATA_DIR.values()))
+            cli_keys = list(SQLITE_TABLE_MAP.keys())
     except ValueError:
         return json.dumps(
-            {"ok": False, "message": "平台参数无效，可选值: douyin(抖音)/xhs(小红书)/bilibili(B站)，也接受缩写 dy/bili"},
+            {"ok": False, "message": "平台参数无效，可选值: 抖音、小红书、快手、B站、微博、贴吧、知乎，也接受英文名或平台缩写"},
             ensure_ascii=False,
         )
 
-    for dir_name in dir_names:
-        base_dir = DATA_DIR / dir_name
-        if not base_dir.is_dir():
+    files: List[Dict[str, Any]] = []
+    db_path = _db_path()
+    for cli_key in cli_keys:
+        tables = SQLITE_TABLE_MAP.get(cli_key)
+        if tables is None:
             continue
-        for path in base_dir.rglob("*"):
-            if not path.is_file() or path.suffix not in (".jsonl", ".json", ".csv"):
-                continue
+        for table in tables:
             try:
-                stat = path.stat()
-            except OSError:
-                continue
+                with sqlite3.connect(str(db_path)) as conn:
+                    cur = conn.execute(f"SELECT COUNT(*), MAX(add_ts) FROM {table}")
+                    count, max_ts = cur.fetchone()
+            except sqlite3.Error:
+                continue  # 表尚未创建：跳过
+            if not count:
+                continue  # 空表不列出，减少 LLM 噪音
             files.append({
-                "path": str(path.relative_to(DATA_DIR)),
-                "size": stat.st_size,
-                "records": _count_records(path),
-                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "path": f"sqlite:{table}",
+                "size": None,
+                "records": int(count or 0),
+                "modified": datetime.fromtimestamp(max_ts / 1000).strftime("%Y-%m-%d %H:%M:%S") if max_ts else "",
             })
 
-    files.sort(key=lambda f: f["modified"], reverse=True)
+    files.sort(key=lambda f: (f["records"] or 0), reverse=True)
     files = files[:MAX_LIST_FILES]
     if not files:
         return json.dumps(
-            {"ok": True, "total": 0, "files": [], "message": "data 目录下暂无数据文件，可先调用 crawl_by_keywords 抓取。"},
+            {"ok": True, "total": 0, "files": [], "message": "本地数据库暂无数据，可先调用 crawl_by_keywords 抓取。"},
             ensure_ascii=False,
         )
     return json.dumps({"ok": True, "total": len(files), "files": files}, ensure_ascii=False)

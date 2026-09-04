@@ -52,7 +52,8 @@ class ZhihuStoreFactory:
         store_class = ZhihuStoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
             raise ValueError("[ZhihuStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
-        return store_class()
+        from ..dual_write_store import maybe_dual_write
+        return maybe_dual_write(store_class(), ZhihuStoreFactory.STORES["sqlite"])
 
 async def batch_update_zhihu_contents(contents: List[ZhihuContent]):
     """

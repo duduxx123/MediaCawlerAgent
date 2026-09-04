@@ -17,8 +17,8 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 #
 # 教学版说明：为防止爬取到的用户个人信息被用于定位真人并私信骚扰，
-# 本 ORM 不再持久化任何可识别用户的字段（用户 ID、IP 归属地、头像、
-# 主页链接、签名、性别等一律不落库）。原始用户 ID 在提取层经
+# 本 ORM 不持久化 IP 归属地、头像、主页链接、签名、性别等个人资料字段。
+# 抖音开启原始用户信息开关时，额外保存公开的 douyin_id（抖音号）；原始用户 ID 经
 # tools.user_hash.anonymize_user_id 转为匿名 creator_hash 后写入，
 # 仅用于"同一创作者"的内容分组；昵称保留但经 mask_nickname 中间脱敏。
 # 创作者个人档案表（XhsCreator/DyCreator/WeiboCreator/TiebaCreator/
@@ -88,6 +88,7 @@ class DouyinAweme(Base):
     __tablename__ = 'douyin_aweme'
     id = Column(Integer, primary_key=True, comment='主键ID')
     creator_hash = Column(String(64), index=True, comment='创作者匿名哈希')
+    douyin_id = Column(Text, index=True, comment='创作者抖音号（公开 unique_id/short_id）')
     nickname = Column(Text, comment='用户昵称(已脱敏)')
     add_ts = Column(BigInteger, comment='添加时间戳')
     last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
@@ -111,6 +112,7 @@ class DouyinAwemeComment(Base):
     __tablename__ = 'douyin_aweme_comment'
     id = Column(Integer, primary_key=True, comment='主键ID')
     creator_hash = Column(String(64), index=True, comment='创作者匿名哈希')
+    douyin_id = Column(Text, index=True, comment='评论者抖音号（公开 unique_id/short_id）')
     nickname = Column(Text, comment='用户昵称(已脱敏)')
     add_ts = Column(BigInteger, comment='添加时间戳')
     last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
@@ -192,6 +194,7 @@ class XhsNote(Base):
     __tablename__ = 'xhs_note'
     id = Column(Integer, primary_key=True, comment='主键ID')
     creator_hash = Column(String(64), index=True, comment='创作者匿名哈希')
+    red_id = Column(Text, index=True, comment='创作者公开小红书号')
     nickname = Column(Text, comment='用户昵称(已脱敏)')
     add_ts = Column(BigInteger, comment='添加时间戳')
     last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
@@ -216,6 +219,7 @@ class XhsNoteComment(Base):
     __tablename__ = 'xhs_note_comment'
     id = Column(Integer, primary_key=True, comment='主键ID')
     creator_hash = Column(String(64), index=True, comment='创作者匿名哈希')
+    red_id = Column(Text, index=True, comment='评论者公开小红书号')
     nickname = Column(Text, comment='用户昵称(已脱敏)')
     add_ts = Column(BigInteger, comment='添加时间戳')
     last_modify_ts = Column(BigInteger, comment='最后修改时间戳')

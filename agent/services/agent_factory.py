@@ -55,7 +55,7 @@ DEFAULT_SUMMARY_KEEP_MESSAGES = 20
 AGENT_MEMORY_DB_ENV = "AGENT_MEMORY_DB"
 DEFAULT_THREAD_ID = "default"
 
-SYSTEM_PROMPT = """你是「MediaCrawler 助手」，帮助用户抓取和分析抖音、小红书、Bilibili 的内容数据。
+SYSTEM_PROMPT = """你是「MediaCrawler 助手」，帮助用户抓取和分析抖音、小红书、快手、Bilibili、微博、贴吧、知乎的内容数据。
 
 可用工具：
 - crawl_by_keywords：按关键词搜索并抓取内容（search 模式）
@@ -63,10 +63,14 @@ SYSTEM_PROMPT = """你是「MediaCrawler 助手」，帮助用户抓取和分析
 - crawl_creator：按创作者主页抓取其作品（creator 模式）
 - read_crawled_data：读取 data 目录中已抓取的内容数据
 - list_crawled_files：列出 data 目录中已抓取的数据文件
-- fetch_comment_users：抓取抖音视频/图集评论及评论者信息（sec_uid），AI 获客第一步
+- fetch_comment_users：抓取抖音视频/图集评论及评论者信息（sec_uid/douyin_id），AI 获客第一步
 - post_comment：在抖音视频/图集下发布一条新评论（图集帖会自动激活评论区）
 - reply_comment：回复某个用户的评论（@某人，需 sec_uid；同一用户多条评论时传 comment_index 序号精确定位）
 - send_dm_user：向指定用户发送私信（DM，需 sec_uid）
+- post_bilibili_comment：在 B站视频（BV/av 链接）或动态（opus 链接）下发布评论/楼中楼回复（真实发布，需用户 Chrome 已登录 B站）
+- prepare_xhs_dm：把小红书私信填入草稿但不发送（可传公开小红书号，或评论记录中的原始 user_id/creator_hash）
+- confirm_xhs_dm：凭一次性 draft_id 确认发送已准备的小红书私信
+- post_kuaishou_comment：在快手作品下发布一条一级评论（真实发布；不支持回复指定评论）
 
 使用策略：
 1. 先确认用户意图，选择最合适的平台与模式（search/detail/creator）；一次任务尽量合并为一次工具调用，不要重复抓取相同内容。
@@ -76,10 +80,11 @@ SYSTEM_PROMPT = """你是「MediaCrawler 助手」，帮助用户抓取和分析
 5. 抓取完成后向用户报告：保存的文件路径、记录数、代表性内容标题（引用工具返回的摘要），不要编造统计数字。
 6. 数据文件位于项目 data/ 目录，可用 read_crawled_data / list_crawled_files 查看和分析。
 7. 回答保持简洁：先结论后细节，默认使用中文。
-8. AI 获客流程：fetch_comment_users 拿到评论与 sec_uid → 识别有意向的客户 → reply_comment 评论回复（sec_uid 原样传递；同一用户有多条评论时传 comment_index 抓取序号精确定位，不要用评论正文消歧——表情/图片在页面里渲染成图片，文本对不上）或 send_dm_user 私信深度跟进；内容要针对该用户评论个性化、自然克制，不要推销腔。
-9. post_comment / reply_comment / send_dm_user 是真实发布的写操作：发布前确认内容合规；同一视频避免高频连发；未经用户明确要求不要主动发布；私信是打扰性最强的渠道，除非用户明确要求否则不要主动私信。
-10. 写操作依赖用户本地已开启远程调试的 Chrome 且需已登录抖音（自动连接，每次新连接需用户在 Chrome 弹窗点『允许』）；工具报连接错误时如实告知用户。
-11. reply_comment 失败提示「找不到目标评论」时不要对同一目标反复重试：热门评论区是动态热排序，应重新 fetch_comment_users 后换一条更靠前的评论（或补传 comment_index 序号精确定位）。"""
+8. AI 获客流程：fetch_comment_users 拿到抖音评论与 sec_uid → 识别有意向的客户 → reply_comment 评论回复或 send_dm_user 私信。小红书评论由 crawl_by_keywords/crawl_specified_ids(enable_comments=True) 抓取，XHS_SAVE_ORIGINAL_USER_INFO=True 时 xhs_note_comment.creator_hash 即原始 user_id；选定目标后先 prepare_xhs_dm，只填草稿，必须展示目标和正文并等用户确认后才能调用 confirm_xhs_dm。快手网页版当前只提供稳定的作品一级评论能力；用户明确要求在某作品下评论时调用 post_kuaishou_comment，不要声称可以回复某条快手评论。内容要个性化、自然克制，不要推销腔。B站获客：post_bilibili_comment 在目标视频（BV/av 链接）或动态（t.bilibili.com/opus、…/dynamic 链接）下发布评论；楼中楼回复需目标评论的 rpid（root=根评论 rpid；回复楼中楼内某条评论再传 parent=该条 rpid）。
+9. post_comment / reply_comment / send_dm_user / confirm_xhs_dm / post_bilibili_comment / post_kuaishou_comment 是真实发布的写操作：发布前确认内容合规；同一目标避免高频连发；未经用户明确要求不要主动发布；私信是打扰性最强的渠道，除非用户明确要求否则不要主动私信。prepare_xhs_dm 只填写草稿，不算发送，但必须基于用户已提出的私信意图。快手一级评论写接口返回 result=1 且带 commentId 时表示发布成功；评论读取列表可能延迟同步，self_checked=false 不代表失败，也不得自动重试。
+10. 写操作依赖用户本地已开启远程调试的 Chrome 且需已登录对应平台；当前进程尚无内存登录态或内存登录态失效时，才需要用户在 Chrome 弹窗点『允许』。post_bilibili_comment 依赖用户 Chrome 已登录 B站（cookie 含 bili_jct/SESSDATA）；工具报连接错误时如实告知用户。
+11. reply_comment 失败提示「找不到目标评论」时不要对同一目标反复重试：热门评论区是动态热排序，应重新 fetch_comment_users 后换一条更靠前的评论（或补传 comment_index 序号精确定位）。
+12. post_bilibili_comment 返回 need_captcha=1 或提示风控/验证码/发布频率受限时：不要对同一目标自动重试，如实告知用户可能被风控，建议放缓发布频率、更换内容，或请用户在 B站网页端手动完成验证。"""
 
 
 def load_settings() -> SimpleNamespace:
@@ -266,6 +271,22 @@ def _tool_result_ok(content: Any) -> bool:
     return False
 
 
+def _has_orphaned_tool_calls(messages: Optional[List[Any]]) -> bool:
+    """判断 checkpoint 消息是否以悬空的 tool_calls 结尾（上轮被中断留下的坏状态）。
+
+    正常结束的一轮，最后一条要么是无 tool_calls 的最终 AIMessage，要么是 ToolMessage
+    （工具已执行、等待模型续写）；若最后一条是带 tool_calls 的 AIMessage，说明工具节点
+    没来得及写回 ToolMessage。把这段历史回放给模型会触发 400
+    （insufficient tool messages following tool_calls message）。
+    """
+    if not messages:
+        return False
+    last = messages[-1]
+    if getattr(last, "type", None) not in ("ai", "AIMessage", "AIMessageChunk"):
+        return False
+    return bool(getattr(last, "tool_calls", None))
+
+
 async def chat_stream(
     message: str,
     history: Optional[List[Dict[str, str]]] = None,
@@ -301,47 +322,65 @@ async def chat_stream(
     except Exception:
         state = None
     has_memory = bool(state and (state.values or {}).get("messages"))
+
+    # 修复坏状态：上轮若被中断，checkpoint 会以悬空的 tool_calls 结尾，
+    # 直接回放会触发 400。清掉该会话记忆，让本轮从干净状态重来。
+    if has_memory and _has_orphaned_tool_calls((state.values or {}).get("messages", [])):
+        await clear_thread(thread_id or DEFAULT_THREAD_ID)
+        has_memory = False
+
     messages = [HumanMessage(content=message)]
     if not has_memory:
         messages = _history_to_messages(history) + messages
 
     reply_parts: List[str] = []
     seen_tool_calls = set()
-    try:
-        async for event in agent.astream({"messages": messages}, config=config):
-            # 默认 stream_mode="updates"：event 为 {节点名: {"messages": [...]}}
-            for node_output in event.values():
-                if not isinstance(node_output, dict):
-                    continue
-                for msg in node_output.get("messages", []) or []:
-                    data = msg.model_dump() if hasattr(msg, "model_dump") else msg
-                    msg_type = data.get("type")
+    attempt = 0
+    while True:
+        try:
+            async for event in agent.astream({"messages": messages}, config=config):
+                # 默认 stream_mode="updates"：event 为 {节点名: {"messages": [...]}}
+                for node_output in event.values():
+                    if not isinstance(node_output, dict):
+                        continue
+                    for msg in node_output.get("messages", []) or []:
+                        data = msg.model_dump() if hasattr(msg, "model_dump") else msg
+                        msg_type = data.get("type")
 
-                    if msg_type in ("ai", "AIMessageChunk"):
-                        tool_calls = data.get("tool_calls") or []
-                        for tc in tool_calls:
-                            name = tc.get("name")
-                            if name and name not in seen_tool_calls:
-                                seen_tool_calls.add(name)
-                                yield {"type": "tool_start", "name": name, "args": tc.get("args") or {}}
-                        content = data.get("content") or ""
-                        if isinstance(content, list):
-                            content = "".join(
-                                (c.get("text", "") if isinstance(c, dict) else str(c)) for c in content
-                            )
-                        if content:
-                            reply_parts.append(content)
-                            yield {"type": "token", "content": content}
+                        if msg_type in ("ai", "AIMessageChunk"):
+                            tool_calls = data.get("tool_calls") or []
+                            for tc in tool_calls:
+                                name = tc.get("name")
+                                if name and name not in seen_tool_calls:
+                                    seen_tool_calls.add(name)
+                                    yield {"type": "tool_start", "name": name, "args": tc.get("args") or {}}
+                            content = data.get("content") or ""
+                            if isinstance(content, list):
+                                content = "".join(
+                                    (c.get("text", "") if isinstance(c, dict) else str(c)) for c in content
+                                )
+                            if content:
+                                reply_parts.append(content)
+                                yield {"type": "token", "content": content}
 
-                    elif msg_type == "tool":
-                        yield {
-                            "type": "tool_end",
-                            "name": data.get("name", ""),
-                            "result_ok": _tool_result_ok(data.get("content")),
-                        }
-    except Exception as e:
-        yield {"type": "error", "message": f"智能体运行出错: {type(e).__name__}: {e}"}
-        return
+                        elif msg_type == "tool":
+                            yield {
+                                "type": "tool_end",
+                                "name": data.get("name", ""),
+                                "result_ok": _tool_result_ok(data.get("content")),
+                            }
+            break
+        except Exception as e:
+            err_msg = str(e)
+            if attempt == 0 and "tool_calls" in err_msg and "tool messages" in err_msg:
+                # 兜底：状态里仍有悬空 tool_calls（上面未判到的情况），清空记忆重试一次
+                attempt += 1
+                await clear_thread(thread_id or DEFAULT_THREAD_ID)
+                reply_parts.clear()
+                seen_tool_calls.clear()
+                continue
+            yield {"type": "error", "message": f"智能体运行出错: {type(e).__name__}: {e}"}
+            return
 
     reply = "".join(reply_parts).strip()
     if not reply:

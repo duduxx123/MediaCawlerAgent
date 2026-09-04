@@ -138,6 +138,7 @@ class XhsDbStoreImplement(AbstractStore):
         last_modify_ts = int(get_current_timestamp())
         note = XhsNote(
             creator_hash=content_item.get("creator_hash"),
+            red_id=content_item.get("red_id"),
             nickname=content_item.get("nickname"),
             add_ts=add_ts,
             last_modify_ts=last_modify_ts,
@@ -171,6 +172,12 @@ class XhsDbStoreImplement(AbstractStore):
             "share_count": str(content_item.get("share_count")),
             "last_update_time": content_item.get("last_update_time"),
         }
+        if content_item.get("creator_hash"):
+            update_data["creator_hash"] = content_item.get("creator_hash")
+        if content_item.get("red_id"):
+            update_data["red_id"] = content_item.get("red_id")
+        if content_item.get("nickname"):
+            update_data["nickname"] = content_item.get("nickname")
         stmt = update(XhsNote).where(XhsNote.note_id == note_id).values(**update_data)
         await session.execute(stmt)
 
@@ -196,6 +203,7 @@ class XhsDbStoreImplement(AbstractStore):
         last_modify_ts = int(get_current_timestamp())
         comment = XhsNoteComment(
             creator_hash=comment_item.get("creator_hash"),
+            red_id=comment_item.get("red_id"),
             nickname=comment_item.get("nickname"),
             add_ts=add_ts,
             last_modify_ts=last_modify_ts,
@@ -218,6 +226,12 @@ class XhsDbStoreImplement(AbstractStore):
             "like_count": str(comment_item.get("like_count")),
             "sub_comment_count": int(comment_item.get("sub_comment_count", 0) or 0),
         }
+        if comment_item.get("creator_hash"):
+            update_data["creator_hash"] = comment_item.get("creator_hash")
+        if comment_item.get("red_id"):
+            update_data["red_id"] = comment_item.get("red_id")
+        if comment_item.get("nickname"):
+            update_data["nickname"] = comment_item.get("nickname")
         stmt = update(XhsNoteComment).where(XhsNoteComment.comment_id == comment_id).values(**update_data)
         await session.execute(stmt)
 

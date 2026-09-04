@@ -23,7 +23,7 @@ MediaCrawler 爬虫智能体（LangChain Agent）包。
 结构：
 - agent/services/crawler_runner.py  子进程方式运行爬虫（复用 main.py CLI），读取落盘数据
 - agent/services/agent_factory.py   DeepSeek LLM + LangGraph ReAct 智能体构建与流式封装
-- agent/tools/                       LangChain 工具定义（3 个爬取工具 + 2 个数据工具）
+- agent/tools/                       LangChain 工具定义（通用多平台爬取工具 + 数据工具）
 - agent/main.py                      CLI 交互入口
 
 注意：本包绝不 import config / main / cmd_arg / media_platform（避免全局配置副作用），

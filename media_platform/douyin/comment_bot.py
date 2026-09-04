@@ -23,8 +23,9 @@
   - 获取评论（含 userId）：复用本项目 DouYinClient 的评论 API（/aweme/v1/web/comment/list/），
     直接取原始响应里的 user.sec_uid / user.nickname（注意：项目落库时是脱敏哈希的，
     所以这里走内存原始数据，不写 data 文件）。
-  - 发评论 / 回复评论：Playwright 通过 CDP 连接你正在运行的 Chrome（已登录抖音），
-    选择器与流程移植自 D:\\CDP-MCP-demo 的 DouyinService.java（Playwright for Java）。
+  - 发评论 / 回复评论：Playwright 通过 CDP 操作已登录的 Chrome；开发版可连接现有
+    Chrome，打包客户端自动启动 exe 专用 profile。选择器与流程移植自
+    D:\\CDP-MCP-demo 的 DouyinService.java（Playwright for Java）。
 
 用法：
     # 只读：抓取评论并打印（含 sec_uid，供后续 AI 获客识别意向客户）
@@ -45,8 +46,8 @@
     uv run python -m media_platform.douyin.comment_bot <视频链接> --text "私信内容" --dm-to "#3" --dm-send
 
 前提：
-    Chrome 需以 --remote-debugging-port=9222 启动且已登录抖音；
-    或在 chrome://inspect/#remote-debugging 勾选"允许远程调试"。
+    CDP_CONNECT_EXISTING=True 时，Chrome 需开启远程调试且已登录抖音；
+    CDP_CONNECT_EXISTING=False 时，程序自动启动独立 profile，可在该窗口登录抖音。
 """
 
 import argparse
@@ -368,43 +369,55 @@ class DouyinCommentBot:
             return None
 
     async def setup(self) -> None:
-        """CDP 连接现有 Chrome，构建 DouYinClient（cookie 取自浏览器上下文、UA 取自页面）。"""
-        # 强制连接现有浏览器（复用其登录态），这是本脚本的固定策略
-        config.CDP_CONNECT_EXISTING = True
-        print(f"[CDP 连接] 正在连接 Chrome（调试端口 {config.CDP_DEBUG_PORT}）...")
-        print("[CDP 连接] 注意：若 Chrome 弹出『远程调试授权』确认框，请点击允许，否则会连接超时")
+        """按配置连接浏览器并构建 DouYinClient（登录态来自浏览器上下文）。"""
         self._playwright = await async_playwright().start()
         self._cdp_manager = None
 
-        # 方式1（优先）：DevToolsActivePort 文件里的精确 ws 地址（旧项目验证过的做法）
-        ws_url = self._devtools_ws_url()
-        if ws_url:
-            try:
-                print(f"[CDP 连接] 尝试 DevToolsActivePort 地址: {ws_url}")
-                cdp_browser = await self._playwright.chromium.connect_over_cdp(ws_url, timeout=15000)
-                if cdp_browser.contexts:
-                    self._browser_context = cdp_browser.contexts[0]
-                else:
-                    self._browser_context = await cdp_browser.new_context()
-                print("[CDP 连接] ✅ 已连接")
-            except Exception as e:
-                # 文件存在但连不上：几乎都是 Chrome 的授权弹窗没点「允许」（或 Chrome 刚重启、
-                # 端口文件已过期）。通用回退走的是同一个浏览器授权，一样连不上——
-                # 不再干等 60s 握手超时，直接快速失败给出明确指引。
-                raise RuntimeError(
-                    f"CDP 连接失败（DevToolsActivePort 地址 {ws_url}）：{e}。"
-                    "请确认 Chrome 以远程调试模式运行且已登录抖音，并在 Chrome 弹出的授权框点击『允许』后重试。"
-                ) from e
+        if config.CDP_CONNECT_EXISTING:
+            print(f"[CDP 连接] 正在连接现有 Chrome（调试端口 {config.CDP_DEBUG_PORT}）...")
+            print("[CDP 连接] 注意：若 Chrome 弹出『远程调试授权』确认框，请点击允许，否则会连接超时")
+            # 方式1（优先）：DevToolsActivePort 文件里的精确 ws 地址（旧项目验证过的做法）
+            ws_url = self._devtools_ws_url()
+            if ws_url:
+                try:
+                    print(f"[CDP 连接] 尝试 DevToolsActivePort 地址: {ws_url}")
+                    cdp_browser = await self._playwright.chromium.connect_over_cdp(ws_url, timeout=15000)
+                    if cdp_browser.contexts:
+                        self._browser_context = cdp_browser.contexts[0]
+                    else:
+                        self._browser_context = await cdp_browser.new_context()
+                    print("[CDP 连接] ✅ 已连接")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"CDP 连接失败（DevToolsActivePort 地址 {ws_url}）：{e}。"
+                        "请确认 Chrome 以远程调试模式运行且已登录抖音，并在 Chrome 弹出的授权框点击『允许』后重试。"
+                    ) from e
 
-        # 方式2（回退）：端口文件不存在（Chrome 未暴露调试端口）时才走通用连接
-        if self._browser_context is None:
-            self._cdp_manager = CDPBrowserManager()
-            self._browser_context = await self._cdp_manager.launch_and_connect(
-                self._playwright,
-                playwright_proxy=None,
-                user_agent=None,
-                headless=False,
-            )
+            # 方式2（回退）：端口文件不存在时走通用现有浏览器连接
+            if self._browser_context is None:
+                self._cdp_manager = CDPBrowserManager()
+                self._browser_context = await self._cdp_manager.launch_and_connect(
+                    self._playwright,
+                    playwright_proxy=None,
+                    user_agent=None,
+                    headless=False,
+                )
+        else:
+            # 打包客户端：启动 exe 旁 browser_data/cdp_dy_user_data_dir，绝不读取
+            # 用户默认 Chrome 的 DevToolsActivePort，也不会弹出现有浏览器授权框。
+            print("[CDP 连接] 正在启动客户端独立抖音浏览器...")
+            saved_platform = config.PLATFORM
+            try:
+                config.PLATFORM = "dy"
+                self._cdp_manager = CDPBrowserManager()
+                self._browser_context = await self._cdp_manager.launch_and_connect(
+                    self._playwright,
+                    playwright_proxy=None,
+                    user_agent=None,
+                    headless=False,
+                )
+            finally:
+                config.PLATFORM = saved_platform
         self.page = await self._browser_context.new_page()
         self._bot_page = self.page
         # 注意：不要 set_viewport_size —— 对 CDP 连接的现有浏览器，它会施加 Emulation
@@ -424,8 +437,8 @@ class DouyinCommentBot:
     async def close(self, close_page: bool = True) -> None:
         """关闭自己打开的标签页（close_page=True）。
 
-        不要调用 cdp_manager.cleanup()——它会把用户 Chrome 的上下文关掉。
-        close_page=False（私信只填不送流程）：只断开 CDP 连接，标签页保持打开供用户肉眼确认。
+        连接现有浏览器时不关闭用户上下文；独立模式则清理程序自己启动的浏览器。
+        close_page=False（私信只填不送流程）在现有浏览器模式下保留标签页供用户确认。
         """
         if close_page:
             for pg in [self.page] + getattr(self, "_dm_aux_pages", []):
@@ -437,6 +450,11 @@ class DouyinCommentBot:
                 except Exception:
                     pass
         self._dm_aux_pages = []
+        if self._cdp_manager is not None and not config.CDP_CONNECT_EXISTING:
+            try:
+                await asyncio.wait_for(self._cdp_manager.cleanup(), timeout=20)
+            except Exception:
+                pass
         if self._playwright:
             try:
                 # 2026-08-24 真机：崩溃路径下 playwright.stop() 在 Windows 会挂死进程，必须限时

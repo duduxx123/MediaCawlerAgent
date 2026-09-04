@@ -19,9 +19,12 @@
 
 from langchain_core.tools import BaseTool
 
+from .bili_comment_tools import post_bilibili_comment
 from .comment_tools import fetch_comment_users, post_comment, reply_comment, send_dm_user
 from .crawl_tools import crawl_by_keywords, crawl_creator, crawl_specified_ids
 from .data_tool import list_crawled_files, read_crawled_data
+from .kuaishou_comment_tools import post_kuaishou_comment
+from .xhs_dm_tools import confirm_xhs_dm, prepare_xhs_dm
 
 ALL_TOOLS: list[BaseTool] = [
     crawl_by_keywords,
@@ -33,6 +36,10 @@ ALL_TOOLS: list[BaseTool] = [
     post_comment,
     reply_comment,
     send_dm_user,
+    post_bilibili_comment,
+    prepare_xhs_dm,
+    confirm_xhs_dm,
+    post_kuaishou_comment,
 ]
 
 __all__ = [
@@ -46,4 +53,8 @@ __all__ = [
     "post_comment",
     "reply_comment",
     "send_dm_user",
+    "post_bilibili_comment",
+    "prepare_xhs_dm",
+    "confirm_xhs_dm",
+    "post_kuaishou_comment",
 ]

@@ -63,7 +63,8 @@ class KuaishouStoreFactory:
         if not store_class:
             raise ValueError(
                 "[KuaishouStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
-        return store_class()
+        from ..dual_write_store import maybe_dual_write
+        return maybe_dual_write(store_class(), KuaishouStoreFactory.STORES["sqlite"])
 
 
 async def update_kuaishou_video(video_item: Dict):

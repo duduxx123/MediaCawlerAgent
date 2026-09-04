@@ -40,3 +40,12 @@ XHS_CREATOR_ID_LIST = [
 # 与昵称保存原文，用于 AI 获客等需要定位真实用户的场景。False：教学版脱敏（sha256 哈希 + 昵称打码）。
 # 注意：原始用户信息属于个人信息，请仅用于本人授权范围内的合法用途。
 XHS_SAVE_ORIGINAL_USER_INFO = True
+
+# 是否为笔记作者/评论者补取用户可见的“小红书号”（profile basicInfo.redId）。
+# 评论接口通常只有内部 user_id；开启后会按 user_id 去重访问用户主页，失败时仅留空 red_id，
+# 不影响笔记和评论主体落库。仅 XHS_SAVE_ORIGINAL_USER_INFO=True 时生效。
+XHS_FETCH_PUBLIC_RED_ID = True
+XHS_PUBLIC_RED_ID_MAX_CONCURRENCY = 1
+XHS_PUBLIC_RED_ID_FETCH_INTERVAL = 0.4
+# 单次爬取最多补查多少个不同用户，防止大任务产生过多主页请求；0 表示不限制。
+XHS_PUBLIC_RED_ID_MAX_USERS_PER_RUN = 100

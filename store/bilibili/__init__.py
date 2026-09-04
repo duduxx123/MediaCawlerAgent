@@ -63,7 +63,8 @@ class BiliStoreFactory:
         store_class = BiliStoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
             raise ValueError("[BiliStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
-        return store_class()
+        from ..dual_write_store import maybe_dual_write
+        return maybe_dual_write(store_class(), BiliStoreFactory.STORES["sqlite"])
 
 
 async def update_bilibili_video(video_item: Dict):

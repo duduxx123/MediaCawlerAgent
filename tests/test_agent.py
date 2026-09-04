@@ -18,8 +18,10 @@
 
 """爬虫智能体离线单测（不发起网络请求、不启动子进程爬虫）。"""
 
+import asyncio
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +29,8 @@ from agent.services import crawler_runner
 from agent.services.crawler_runner import (
     _collect_outputs,
     _crawl_lock,
+    _prepare_spawn_command,
+    _resolve_project_root,
     _snapshot_sizes,
     build_command,
     extract_compact_record,
@@ -109,6 +113,29 @@ class TestBuildCommand:
         assert "--headless" not in cmd
         assert "--start" not in cmd
 
+    def test_frozen_client_command_enters_crawler_worker(self):
+        cmd = [sys.executable, "main.py", "--platform", "dy", "--type", "search"]
+        prepared = _prepare_spawn_command(cmd, frozen=True)
+        assert prepared == [
+            sys.executable,
+            "--crawler-worker",
+            "--platform", "dy",
+            "--type", "search",
+        ]
+        assert "main.py" not in prepared
+
+    def test_development_command_stays_python_main(self):
+        cmd = [sys.executable, "main.py", "--platform", "dy"]
+        assert _prepare_spawn_command(cmd, frozen=False) == cmd
+
+    def test_frozen_project_root_is_exe_directory(self):
+        root = _resolve_project_root(
+            frozen=True,
+            executable=r"D:\\MediaCrawlerClient\\MediaCrawlerClient.exe",
+            module_file=r"D:\\MediaCrawlerClient\\_internal\\agent\\services\\crawler_runner.py",
+        )
+        assert root == Path(r"D:\\MediaCrawlerClient")
+
 
 # ---------- 平台映射 ----------
 
@@ -118,6 +145,10 @@ class TestPlatformMapping:
         ("douyin", "dy", "douyin"),
         ("xhs", "xhs", "xhs"),
         ("bilibili", "bili", "bili"),
+        ("kuaishou", "ks", "kuaishou"),
+        ("weibo", "wb", "weibo"),
+        ("tieba", "tieba", "tieba"),
+        ("zhihu", "zhihu", "zhihu"),
     ])
     def test_mapping(self, friendly, cli, data_dir):
         assert normalize_platform(friendly) == cli
@@ -129,6 +160,10 @@ class TestPlatformMapping:
         ("抖音", "dy"),
         ("B站", "bili"),
         ("小红书", "xhs"),
+        ("快手", "ks"),
+        ("微博", "wb"),
+        ("贴吧", "tieba"),
+        ("知乎", "zhihu"),
     ])
     def test_platform_aliases(self, alias, cli):
         assert normalize_platform(alias) == cli
@@ -233,7 +268,8 @@ class TestCollectOutputs:
             f.write(json.dumps({**BILI_RECORD, "title": "新增第三条"}, ensure_ascii=False) + "\n")
 
         outputs = _collect_outputs("dy", "search", "jsonl", baseline, sample_limit=5)
-        assert outputs["total_records"] == 1
+        assert outputs["contents_records"] == 1
+        assert outputs["comments_records"] == 0
         assert len(outputs["files"]) == 1
         assert outputs["files"][0]["records"] == 1
         assert outputs["samples"][0]["title"] == "新增第三条"
@@ -245,31 +281,57 @@ class TestCollectOutputs:
         baseline = _snapshot_sizes(path.parent, "search", "jsonl")
 
         outputs = _collect_outputs("dy", "search", "jsonl", baseline, sample_limit=5)
-        assert outputs["total_records"] == 0
+        assert outputs["contents_records"] == 0
+        assert outputs["comments_records"] == 0
         assert outputs["files"] == []
         assert outputs["samples"] == []
 
     def test_collect_empty_dir(self, tmp_path, monkeypatch):
         monkeypatch.setattr(crawler_runner, "DATA_DIR", tmp_path / "data")
         outputs = _collect_outputs("dy", "search", "jsonl", {}, sample_limit=5)
-        assert outputs["total_records"] == 0
+        assert outputs["contents_records"] == 0
+        assert outputs["comments_records"] == 0
         assert outputs["files"] == []
 
 
 class TestDataTools:
+    """data_tool 已切换为读取本地 SQLite（历史 jsonl 文件语义被替代）。"""
+
+    @pytest.fixture
+    def sqlite_data_env(self, tmp_path, monkeypatch):
+        import config as config_mod
+        from config import db_config
+        from database import db_session
+
+        db_path = tmp_path / "agent_test.db"
+        monkeypatch.setitem(db_config.sqlite_db_config, "db_path", str(db_path))
+        monkeypatch.setattr(config_mod, "SAVE_DATA_OPTION", "sqlite")
+        db_session._engines.clear()
+        asyncio.run(db_session.create_tables("sqlite"))
+        yield db_path
+        db_session._engines.clear()
 
     @pytest.mark.asyncio
-    async def test_read_crawled_data(self, tmp_path, monkeypatch):
+    async def test_read_crawled_data(self, sqlite_data_env):
         import agent.tools.data_tool as data_tool
+        from database import models
+        from database.db_session import get_session
 
-        monkeypatch.setattr(data_tool, "DATA_DIR", tmp_path / "data")
-        _write_fake_data(tmp_path, records=[BILI_RECORD, XHS_RECORD, {**BILI_RECORD, "title": "第三条"}])
+        async def _seed():
+            async with get_session() as session:
+                session.add_all([
+                    models.DouyinAweme(aweme_id="a1", title="探店合集", aweme_url="https://e.com/a1", add_ts=1000),
+                    models.DouyinAweme(aweme_id="a2", title="编程副业", aweme_url="https://e.com/a2", add_ts=2000),
+                    models.DouyinAweme(aweme_id="a3", title="第三条", aweme_url="https://e.com/a3", add_ts=3000),
+                ])
+
+        await _seed()
 
         result = json.loads(await data_tool.read_crawled_data.ainvoke({"platform": "douyin", "limit": 2}))
         assert result["ok"] is True
         assert result["total"] == 2
         assert len(result["records"]) == 2
-        # 尾部优先：最新追加的记录排在最前
+        # add_ts 倒序：最新入库的记录排在最前
         assert result["records"][0]["title"] == "第三条"
 
         filtered = json.loads(await data_tool.read_crawled_data.ainvoke({"platform": "douyin", "keyword_filter": "探店"}))
@@ -278,30 +340,64 @@ class TestDataTools:
         assert filtered["records"][0]["title"] == "探店合集"
 
     @pytest.mark.asyncio
-    async def test_read_crawled_data_no_file(self, tmp_path, monkeypatch):
+    async def test_read_crawled_data_no_file(self, sqlite_data_env):
         import agent.tools.data_tool as data_tool
 
-        monkeypatch.setattr(data_tool, "DATA_DIR", tmp_path / "data")
         result = json.loads(await data_tool.read_crawled_data.ainvoke({"platform": "bilibili"}))
         assert result["ok"] is False
         assert "crawl_by_keywords" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_list_crawled_files(self, tmp_path, monkeypatch):
+    async def test_list_crawled_files(self, sqlite_data_env):
         import agent.tools.data_tool as data_tool
+        from database import models
+        from database.db_session import get_session
 
-        monkeypatch.setattr(data_tool, "DATA_DIR", tmp_path / "data")
-        _write_fake_data(tmp_path, platform_dir="douyin")
-        _write_fake_data(tmp_path, platform_dir="bili", filename="search_contents_2026-08-18.jsonl")
+        async def _seed():
+            async with get_session() as session:
+                session.add_all([
+                    models.DouyinAweme(aweme_id="a1", title="t1", aweme_url="https://e.com/a1", add_ts=1000),
+                    models.DouyinAweme(aweme_id="a2", title="t2", aweme_url="https://e.com/a2", add_ts=2000),
+                    models.BilibiliVideo(video_id="v1", title="b1", video_url="https://b.com/v1", add_ts=3000),
+                ])
+
+        await _seed()
 
         all_files = json.loads(await data_tool.list_crawled_files.ainvoke({"platform": ""}))
         assert all_files["ok"] is True
-        assert all_files["total"] == 2
+        assert all_files["total"] == 2  # 只列出有数据的表
 
         only_douyin = json.loads(await data_tool.list_crawled_files.ainvoke({"platform": "douyin"}))
         assert only_douyin["total"] == 1
         assert "douyin" in only_douyin["files"][0]["path"]
         assert only_douyin["files"][0]["records"] == 2
+
+    def test_collect_outputs_db_incremental(self, sqlite_data_env):
+        """_collect_outputs_db：按表行数差识别本次新增，样本按 add_ts 倒序。"""
+        import agent.services.crawler_runner as crawler_runner
+        from database import models
+        from database.db_session import get_session
+
+        baseline = {"douyin_aweme": 0, "douyin_aweme_comment": 0}
+        outputs = crawler_runner._collect_outputs_db("dy", baseline, sample_limit=2)
+        assert outputs["contents_records"] == 0
+
+        async def _seed():
+            async with get_session() as session:
+                session.add_all([
+                    models.DouyinAweme(aweme_id="a1", title="t1", aweme_url="https://e.com/a1", add_ts=1000),
+                    models.DouyinAweme(aweme_id="a2", title="t2", aweme_url="https://e.com/a2", add_ts=2000),
+                    models.DouyinAwemeComment(comment_id="c1", aweme_id="a1", content="x", add_ts=1500),
+                ])
+
+        asyncio.run(_seed())
+
+        outputs = crawler_runner._collect_outputs_db("dy", baseline, sample_limit=2)
+        assert outputs["contents_records"] == 2
+        assert outputs["comments_records"] == 1
+        assert outputs["files"][0]["path"] == "sqlite:douyin_aweme"
+        assert len(outputs["samples"]) == 2
+        assert outputs["samples"][0]["title"] == "t2"  # add_ts 倒序
 
 
 # ---------- 工具结果格式化 ----------
@@ -312,7 +408,8 @@ class TestFormatResult:
         result = _format_result(
             {
                 "ok": True,
-                "total_records": 3,
+                "contents_records": 2,
+                "comments_records": 1,
                 "files": [{"path": "douyin/jsonl/search_contents_2026-08-19.jsonl", "records": 3, "size": 100}],
                 "samples": [{"title": "t1"}],
                 "existing": False,
@@ -324,7 +421,8 @@ class TestFormatResult:
         data = json.loads(result)
         assert data["ok"] is True
         assert data["platform"] == "抖音"
-        assert data["total_records"] == 3
+        assert data["contents_records"] == 2
+        assert data["comments_records"] == 1
         assert "douyin/jsonl" in data["files"][0]
 
     def test_failure_with_login_hint(self):
@@ -541,6 +639,8 @@ class TestToolRegistration:
             "crawl_by_keywords", "crawl_specified_ids", "crawl_creator",
             "read_crawled_data", "list_crawled_files",
             "fetch_comment_users", "post_comment", "reply_comment", "send_dm_user",
+            "post_bilibili_comment", "prepare_xhs_dm", "confirm_xhs_dm",
+            "post_kuaishou_comment",
         }
         for t in ALL_TOOLS:
             assert t.description

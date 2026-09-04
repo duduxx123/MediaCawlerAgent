@@ -281,6 +281,32 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
         }
         return await self.request_rest_v2("/rest/v/photo/comment/sublist", post_data)
 
+    async def add_comment(
+        self,
+        photo_id: str,
+        photo_author_id: str,
+        content: str,
+        exp_tag: str = "",
+    ) -> Dict:
+        """发布快手视频一级评论，返回 ``visionAddComment`` 的原始业务结果。
+
+        写接口不在 ``request()`` 内把 ``result != 1`` 转成异常，调用方需要区分
+        未登录、风控和发布状态不确定等情况，并禁止盲目自动重试。
+        """
+        variables: Dict[str, Any] = {
+            "photoId": photo_id,
+            "photoAuthorId": photo_author_id,
+            "content": content,
+            "expTag": exp_tag,
+        }
+        post_data = {
+            "operationName": "visionAddComment",
+            "variables": variables,
+            "query": self.graphql.get("add_comment"),
+        }
+        result = await self.post("", post_data)
+        return result.get("visionAddComment") or {}
+
     async def get_creator_profile(self, userId: str) -> Dict:
         post_data = {
             "operationName": "visionProfile",

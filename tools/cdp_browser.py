@@ -24,6 +24,7 @@ import socket
 import httpx
 import signal
 import atexit
+import threading
 from typing import Optional, Dict, Any
 from playwright.async_api import Browser, BrowserContext, Playwright
 
@@ -59,6 +60,16 @@ class CDPBrowserManager:
 
         # Register atexit cleanup
         atexit.register(sync_cleanup)
+
+        # signal.signal() 只能在主解释器的主线程调用。智能体工具运行在 Uvicorn
+        # 后台线程时，浏览器仍由显式 cleanup() 与上面的 atexit 兜底负责清理。
+        if threading.current_thread() is not threading.main_thread():
+            self._cleanup_registered = True
+            utils.logger.info(
+                "[CDPBrowserManager] Running outside main thread; "
+                "registered atexit cleanup and skipped signal handlers"
+            )
+            return
 
         # Register signal handlers (only when no custom handlers exist, to avoid overriding main entry signal handling logic)
         prev_sigint = signal.getsignal(signal.SIGINT)
@@ -447,13 +458,17 @@ class CDPBrowserManager:
                 try:
                     # Check if context is already closed
                     # Try to get page list, if fails means already closed
-                    try:
-                        pages = self.browser_context.pages
-                        if pages is not None:
-                            await self.browser_context.close()
-                            utils.logger.info("[CDPBrowserManager] Browser context closed")
-                    except:
-                        utils.logger.debug("[CDPBrowserManager] Browser context already closed")
+                    if config.CDP_CONNECT_EXISTING:
+                        # 连的是用户已有浏览器：不要关掉用户自己的上下文/窗口，只释放引用
+                        utils.logger.debug("[CDPBrowserManager] Connected to existing browser, skip closing user context")
+                    else:
+                        try:
+                            pages = self.browser_context.pages
+                            if pages is not None:
+                                await self.browser_context.close()
+                                utils.logger.info("[CDPBrowserManager] Browser context closed")
+                        except:
+                            utils.logger.debug("[CDPBrowserManager] Browser context already closed")
                 except Exception as context_error:
                     # Only log warning if error is not due to already being closed
                     error_msg = str(context_error).lower()

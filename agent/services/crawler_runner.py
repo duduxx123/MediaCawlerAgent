@@ -23,11 +23,13 @@
 
 依赖白名单：仅标准库。本模块绝不 import config / main / cmd_arg / media_platform，
 所有爬取参数经子进程命令行传递，保证本进程零全局配置污染。
+（刻意例外：_sqlite_db_path() 内懒导入 config.db_config——仅环境变量/路径常量，无副作用。）
 """
 
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -36,12 +38,19 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 # 工具友好名 -> main.py CLI 的 --platform 取值
-PLATFORM_CLI_KEY = {"douyin": "dy", "xhs": "xhs", "bilibili": "bili"}
+PLATFORM_CLI_KEY = {
+    "douyin": "dy", "xhs": "xhs", "bilibili": "bili",
+    "kuaishou": "ks", "weibo": "wb", "tieba": "tieba", "zhihu": "zhihu",
+}
 # 平台别名（LLM 可能使用 CLI 缩写或中文名）-> CLI key
 PLATFORM_ALIASES = {
     "douyin": "dy", "dy": "dy", "抖音": "dy",
     "xhs": "xhs", "小红书": "xhs",
     "bilibili": "bili", "bili": "bili", "b站": "bili", "哔哩哔哩": "bili",
+    "kuaishou": "ks", "ks": "ks", "快手": "ks",
+    "weibo": "wb", "wb": "wb", "微博": "wb",
+    "tieba": "tieba", "贴吧": "tieba",
+    "zhihu": "zhihu", "知乎": "zhihu",
 }
 # CLI key -> data/ 目录名（与 store/*/_store_impl.py 中 AsyncFileWriter(platform=...) 保持一致）
 PLATFORM_DATA_DIR = {
@@ -54,7 +63,31 @@ PLATFORM_DATA_DIR = {
     "zhihu": "zhihu",
 }
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+# SQLite 镜像：平台 CLI key -> (内容表, 评论表)，表名与 database/models.py 一致
+SQLITE_TABLE_MAP = {
+    "dy": ("douyin_aweme", "douyin_aweme_comment"),
+    "xhs": ("xhs_note", "xhs_note_comment"),
+    "bili": ("bilibili_video", "bilibili_video_comment"),
+    "ks": ("kuaishou_video", "kuaishou_video_comment"),
+    "wb": ("weibo_note", "weibo_note_comment"),
+    "tieba": ("tieba_note", "tieba_comment"),
+    "zhihu": ("zhihu_content", "zhihu_comment"),
+}
+
+def _resolve_project_root(
+    *,
+    frozen: Optional[bool] = None,
+    executable: Optional[str] = None,
+    module_file: Optional[str] = None,
+) -> Path:
+    """解析运行根目录：打包版用 EXE 目录，开发版用源码项目目录。"""
+    is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    if is_frozen:
+        return Path(executable or sys.executable).resolve().parent
+    return Path(module_file or __file__).resolve().parent.parent.parent
+
+
+PROJECT_ROOT = _resolve_project_root()
 DATA_DIR = PROJECT_ROOT / "data"
 
 DEFAULT_TIMEOUT = 900.0  # 秒，可用环境变量 AGENT_CRAWL_TIMEOUT_SECONDS 覆盖
@@ -89,8 +122,8 @@ def normalize_platform(platform: str) -> str:
     key = PLATFORM_ALIASES.get(str(platform).strip().lower())
     if key is None:
         raise ValueError(
-            f"不支持的平台 '{platform}'，可选值: douyin(抖音)/xhs(小红书)/bilibili(B站)，"
-            f"也接受缩写 dy/bili"
+            f"不支持的平台 '{platform}'，可选值: douyin(抖音)/xhs(小红书)/kuaishou(快手)/"
+            f"bilibili(B站)/weibo(微博)/tieba(贴吧)/zhihu(知乎)，也接受平台缩写"
         )
     return key
 
@@ -272,13 +305,15 @@ def _collect_outputs(
     """
     base_dir = DATA_DIR / PLATFORM_DATA_DIR.get(platform_cli_key, platform_cli_key) / save_option
     files: List[Dict[str, Any]] = []
-    total_records = 0
+    contents_records = 0
+    comments_records = 0
     samples: List[Dict[str, Any]] = []
 
     if not base_dir.is_dir():
-        return {"files": files, "total_records": 0, "samples": samples}
+        return {"files": files, "contents_records": 0, "comments_records": 0, "samples": samples}
 
     for item_type in ("contents", "comments"):
+        is_contents = item_type == "contents"
         for p in sorted(base_dir.glob(f"{crawler_type}_{item_type}_*.{save_option}"), key=lambda x: x.stat().st_mtime):
             try:
                 new_size = p.stat().st_size
@@ -290,15 +325,19 @@ def _collect_outputs(
 
             count = 0
             if p.suffix == ".jsonl":
-                is_contents = "_contents_" in p.name
                 count, new_samples = _read_new_records(p, old_size, sample_limit - len(samples) if is_contents else 0)
                 if is_contents:
                     samples.extend(new_samples)
-                total_records += count
+                    contents_records += count
+                else:
+                    comments_records += count
             else:
                 # 非 jsonl（json/csv 整文件重写），无法可靠按 size 增量，粗略计 1 条新增
                 count = None
-                total_records += 1
+                if is_contents:
+                    contents_records += 1
+                else:
+                    comments_records += 1
 
             files.append({
                 "path": str(p.relative_to(DATA_DIR)),
@@ -306,12 +345,100 @@ def _collect_outputs(
                 "size": new_size - old_size,
             })
 
-    return {"files": files, "total_records": total_records, "samples": samples}
+    return {"files": files, "contents_records": contents_records, "comments_records": comments_records, "samples": samples}
+
+
+def _sqlite_db_path() -> Path:
+    """SQLite 数据库文件路径（与 config/db_config.py 单一路径源一致；测试可 monkeypatch sqlite_db_config）。"""
+    from config.db_config import sqlite_db_config
+
+    return Path(sqlite_db_config["db_path"])
+
+
+def _sqlite_table_count(db_path: Path, table: str) -> int:
+    """统计 SQLite 表行数；库/表不存在返回 0（stdlib sqlite3，保持本模块零依赖约束）。"""
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            cur = conn.execute(f"SELECT COUNT(*) FROM {table}")
+            return int(cur.fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
+def _sqlite_latest_samples(db_path: Path, table: str, limit: int) -> List[Dict[str, Any]]:
+    """读取表中最新 N 条内容记录并抽取紧凑摘要（按 add_ts 倒序，各内容表均有该列）。"""
+    samples: List[Dict[str, Any]] = []
+    if limit <= 0:
+        return samples
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(f"SELECT * FROM {table} ORDER BY add_ts DESC LIMIT {limit}")
+            for row in cur.fetchall():
+                compact = extract_compact_record(dict(row))
+                if compact.get("title") or compact.get("url"):
+                    samples.append(compact)
+    except sqlite3.Error:
+        pass
+    return samples
+
+
+def _collect_outputs_db(
+    platform_cli_key: str,
+    baseline: Dict[str, int],
+    sample_limit: int,
+) -> Dict[str, Any]:
+    """SQLite 镜像：对比爬取前后的表行数（行数差即本次新增——镜像按主键去重 upsert，
+    比同日期 append 文件的字节增量更可靠），并抽取最新内容样本。"""
+    tables = SQLITE_TABLE_MAP.get(platform_cli_key)
+    if tables is None:
+        return {"files": [], "contents_records": 0, "comments_records": 0, "samples": []}
+
+    db_path = _sqlite_db_path()
+    contents_table, comments_table = tables
+    new_counts = {
+        contents_table: _sqlite_table_count(db_path, contents_table),
+        comments_table: _sqlite_table_count(db_path, comments_table),
+    }
+
+    files: List[Dict[str, Any]] = []
+    samples: List[Dict[str, Any]] = []
+    for item_type, table in (("contents", contents_table), ("comments", comments_table)):
+        diff = new_counts[table] - baseline.get(table, 0)
+        if diff <= 0:
+            continue
+        files.append({"path": f"sqlite:{table}", "records": diff, "size": 0})
+        if item_type == "contents":
+            samples.extend(_sqlite_latest_samples(db_path, table, sample_limit - len(samples)))
+
+    return {
+        "files": files,
+        "contents_records": new_counts[contents_table] - baseline.get(contents_table, 0),
+        "comments_records": new_counts[comments_table] - baseline.get(comments_table, 0),
+        "samples": samples,
+    }
 
 
 def is_crawling() -> bool:
     """是否已有爬取任务在执行（供 API status 使用）。"""
     return _crawl_lock.locked()
+
+
+def _prepare_spawn_command(cmd: List[str], *, frozen: Optional[bool] = None) -> List[str]:
+    """把开发态 ``python main.py ...`` 转成冻结版 EXE 的 worker 调用。
+
+    PyInstaller 中 ``sys.executable`` 是客户端 EXE；若仍传 ``main.py``，第二个 EXE
+    会进入桌面客户端主入口并再次打开前端。必须显式插入 ``--crawler-worker``，由
+    ``client_launcher.py`` 分流到真正的爬虫入口。
+    """
+    is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    if not is_frozen:
+        return list(cmd)
+
+    args = list(cmd[1:])
+    if args and args[0] == "main.py":
+        args = args[1:]
+    return [sys.executable, "--crawler-worker", *args]
 
 
 def _spawn(cmd: List[str]) -> subprocess.Popen:
@@ -331,9 +458,12 @@ def _spawn(cmd: List[str]) -> subprocess.Popen:
         cwd=str(PROJECT_ROOT),
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
+    launch_cmd = _prepare_spawn_command(cmd)
     try:
-        return subprocess.Popen(cmd, **kwargs)
+        return subprocess.Popen(launch_cmd, **kwargs)
     except FileNotFoundError:
+        if getattr(sys, "frozen", False):
+            raise
         fallback = ["uv", "run", "python", "main.py"] + cmd[2:]
         return subprocess.Popen(fallback, **kwargs)
 
@@ -349,7 +479,10 @@ async def run_crawl(
     """运行一次爬取子进程并返回结构化摘要。绝不抛异常，一切失败信息封装进返回字典。
 
     返回字段：ok / busy / timed_out / exit_code / message / log_tail /
-              files[{path,records,size}] / total_records / samples / login_hint / existing
+              files[{path,records,size}] / contents_records / comments_records /
+              samples / login_hint / existing
+    files[].path 在 SQLite 增量分支形如 "sqlite:<表名>"，records 为本次新增行数；
+    文件分支为 data/ 相对路径。jsonl 文件始终照常写入，但消息中只列 DB 增量（若存在）。
     """
     platform_cli_key = normalize_platform(platform)
 
@@ -377,9 +510,21 @@ async def run_crawl(
         timed_out = False
         exit_code: Optional[int] = None
 
-        # 抓取前记录数据文件基线，用于后续只报告本次新增的记录（同一天 append 到同一文件）
+        # 抓取前记录双基线，用于后续只报告本次新增的记录：
+        # 文件基线（同一天 append 到同一文件，按字节大小增量）+ SQLite 表行数基线
+        # （镜像开启时内容/评论同时落库，行数差即本次新增；镜像关闭/写失败时 DB 无增长，
+        # 自动回退文件增量统计。无条件双快照，每平台仅 2 次 COUNT，代价可忽略。）
         base_dir = DATA_DIR / PLATFORM_DATA_DIR.get(platform_cli_key, platform_cli_key) / save_option
         baseline = _snapshot_sizes(base_dir, crawler_type, save_option)
+
+        baseline_db: Dict[str, int] = {}
+        if platform_cli_key in SQLITE_TABLE_MAP:
+            db_path = _sqlite_db_path()
+            contents_table, comments_table = SQLITE_TABLE_MAP[platform_cli_key]
+            baseline_db = {
+                contents_table: _sqlite_table_count(db_path, contents_table),
+                comments_table: _sqlite_table_count(db_path, comments_table),
+            }
 
         try:
             proc = _spawn(cmd)
@@ -407,7 +552,10 @@ async def run_crawl(
         log_text = sink.text()
         login_hint = any(kw in log_text.lower() for kw in LOGIN_HINT_KEYWORDS)
 
-        outputs = _collect_outputs(platform_cli_key, crawler_type, save_option, baseline, sample_limit)
+        file_outputs = _collect_outputs(platform_cli_key, crawler_type, save_option, baseline, sample_limit)
+        db_outputs = _collect_outputs_db(platform_cli_key, baseline_db, sample_limit)
+        # DB 有新增时以 DB 统计为准（按主键去重更可靠），否则回退文件增量（镜像关闭等场景）
+        outputs = db_outputs if (db_outputs["contents_records"] + db_outputs["comments_records"] > 0) else file_outputs
 
         if timed_out:
             return {
@@ -429,20 +577,22 @@ async def run_crawl(
             }
 
         files = outputs["files"]
-        total_records = outputs["total_records"]
+        contents_records = outputs["contents_records"]
+        comments_records = outputs["comments_records"]
         if not files:
             message = "爬取进程正常结束，但本次未抓取到新的数据（可能关键词无结果、被风控或去重跳过）。"
         else:
             message = (
-                f"爬取完成：本次新增 {total_records} 条记录，"
-                f"文件: {', '.join(f['path'] for f in files)}"
+                f"爬取完成：本次新增内容 {contents_records} 条、评论 {comments_records} 条，"
+                f"存储位置: {', '.join(f['path'] for f in files)}"
             )
         return {
             "ok": True,
             "exit_code": exit_code,
             "message": message,
             "files": files,
-            "total_records": total_records,
+            "contents_records": contents_records,
+            "comments_records": comments_records,
             "samples": outputs["samples"],
             "login_hint": login_hint,
         }
@@ -454,10 +604,16 @@ def _diagnose_failure(log_text: str, exit_code: int) -> str:
     lower = log_text.lower()
     suggestions = []
     if "cdp mode launch failed" in lower or "cdp" in lower and "404" in lower:
-        suggestions.append(
-            "CDP 模式连接浏览器失败：请确认 Chrome/Edge 已开启远程调试端口 9222"
-            "（--remote-debugging-port=9222），或在 config/base_config.py 中把 ENABLE_CDP_MODE 设为 False"
-        )
+        if getattr(sys, "frozen", False):
+            suggestions.append(
+                "客户端独立浏览器启动或连接失败：请关闭客户端启动的残留 Chrome 后重试，"
+                "并确认 exe 旁 browser_data 目录可写；客户端不需要连接本机 9222 端口"
+            )
+        else:
+            suggestions.append(
+                "CDP 模式连接浏览器失败：请确认 Chrome/Edge 已开启远程调试端口 9222"
+                "（--remote-debugging-port=9222），或在 config/base_config.py 中把 ENABLE_CDP_MODE 设为 False"
+            )
     if "timeout" in lower and "goto" in lower:
         suggestions.append("页面加载超时（30 秒）：请检查网络/代理是否可正常访问目标平台，稍后重试")
     if "风控" in log_text or "验证" in log_text:

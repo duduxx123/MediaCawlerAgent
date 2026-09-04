@@ -30,8 +30,12 @@ from pydantic import BaseModel, Field
 
 from ..services.crawler_runner import normalize_platform, run_crawl
 
-PLATFORM_LABELS = {"dy": "抖音", "xhs": "小红书", "bili": "B站"}
-PLATFORM_DESC = "目标平台，可选值: douyin(抖音) / xhs(小红书) / bilibili(B站)，也接受缩写 dy/bili"
+PLATFORM_LABELS = {
+    "dy": "抖音", "xhs": "小红书", "ks": "快手", "bili": "B站",
+    "wb": "微博", "tieba": "贴吧", "zhihu": "知乎",
+}
+PLATFORM_DESC = ("目标平台，可选值: douyin(抖音) / xhs(小红书) / kuaishou(快手) / "
+                 "bilibili(B站) / weibo(微博) / tieba(贴吧) / zhihu(知乎)，也接受平台缩写")
 
 
 class CrawlByKeywordsArgs(BaseModel):
@@ -103,7 +107,8 @@ def _format_result(result: Dict[str, Any], platform: str, mode: str) -> str:
         return json.dumps(out, ensure_ascii=False)
 
     out.update({
-        "total_records": result.get("total_records", 0),
+        "contents_records": result.get("contents_records", 0),
+        "comments_records": result.get("comments_records", 0),
         "message": result.get("message", ""),
         "files": [f.get("path") for f in result.get("files", [])],
         "samples": result.get("samples", []),
@@ -134,7 +139,7 @@ async def crawl_by_keywords(
 抓取完成后返回文件路径、记录数与内容摘要。抓取是耗时的子进程任务（可能数分钟），调用后请耐心等待结果。"""
     platform = _normalize_platform_arg(platform)
     if not platform:
-        return json.dumps({"ok": False, "message": "平台参数无效，可选值: douyin(抖音)/xhs(小红书)/bilibili(B站)，也接受缩写 dy/bili"}, ensure_ascii=False)
+        return json.dumps({"ok": False, "message": PLATFORM_DESC}, ensure_ascii=False)
     result = await run_crawl(
         platform,
         "search",
@@ -162,7 +167,7 @@ async def crawl_specified_ids(
 抓取完成后返回文件路径、记录数与内容摘要。抓取是耗时的子进程任务，调用后请耐心等待结果。"""
     platform = _normalize_platform_arg(platform)
     if not platform:
-        return json.dumps({"ok": False, "message": "平台参数无效，可选值: douyin(抖音)/xhs(小红书)/bilibili(B站)，也接受缩写 dy/bili"}, ensure_ascii=False)
+        return json.dumps({"ok": False, "message": PLATFORM_DESC}, ensure_ascii=False)
     result = await run_crawl(
         platform,
         "detail",
@@ -188,7 +193,7 @@ async def crawl_creator(
 抓取完成后返回文件路径、记录数与内容摘要。抓取是耗时的子进程任务，调用后请耐心等待结果。"""
     platform = _normalize_platform_arg(platform)
     if not platform:
-        return json.dumps({"ok": False, "message": "平台参数无效，可选值: douyin(抖音)/xhs(小红书)/bilibili(B站)，也接受缩写 dy/bili"}, ensure_ascii=False)
+        return json.dumps({"ok": False, "message": PLATFORM_DESC}, ensure_ascii=False)
     result = await run_crawl(
         platform,
         "creator",

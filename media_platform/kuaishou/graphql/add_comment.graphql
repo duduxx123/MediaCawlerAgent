@@ -1,0 +1,20 @@
+mutation visionAddComment(
+  $photoId: String
+  $photoAuthorId: String
+  $content: String
+  $expTag: String
+) {
+  visionAddComment(
+    photoId: $photoId
+    photoAuthorId: $photoAuthorId
+    content: $content
+    expTag: $expTag
+  ) {
+    result
+    commentId
+    content
+    timestamp
+    status
+    __typename
+  }
+}
